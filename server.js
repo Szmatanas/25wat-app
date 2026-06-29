@@ -68,7 +68,7 @@ app.post('/api/research', async (req, res) => {
         }],
       }),
     });
-    if (!clRes.ok) throw new Error(`Claude error: ${clRes.status}`);
+    if (!clRes.ok) clRes.text().then(b=>{console.error("Claude body:",b);throw new Error("Claude "+clRes.status+" "+b)});
     const clData = await clRes.json();
     const raw = (clData.content.find(b => b.type === 'text')?.text || '{}')
       .replace(/```json|```/g, '').trim();
