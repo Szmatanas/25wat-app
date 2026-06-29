@@ -69,14 +69,21 @@ app.post('/api/content/generate', async (req, res) => {
   try {
     const prompt = `Napisz 4 rozne propozycje postow na Facebook dla agencji 25wat na temat: "${topic}".
 
-Kazda propozycja inny kat narracyjny:
-1. Edukacyjny (dane, fakty, lista)
-2. Storytelling (historia klienta lub przyklad)
-3. Prowokacyjny (kontrowersyjny poglad, obalenie mitu)
-4. Angażujący (pytanie do odbiorcy)
+ZASADY FORMATU FB:
+- Pierwsze zdanie to HOOK - ma zatrzymac scrollowanie, max 12 slow, zaczyna sie od liczby lub prowokacyjnego stwierdzenia
+- Krotkie akapity: 1-2 zdania, oddzielone pustą linią
+- Emoji jako separatory sekcji (nie dekoracja): uzyj 2-4 emoji w strategicznych miejscach
+- Ostatnie zdanie to CTA lub pytanie do odbiorcy
+- Dlugosc: 150-250 slow
 
-Odpowiedz TYLKO JSON bez markdown bez em-dash:
-{"posts":[{"type":"edukacyjny","title":"max 5 slow","content":"tresc posta po polsku","hashtags":["tag1","tag2","tag3"]},{"type":"storytelling","title":"...","content":"...","hashtags":[...]},{"type":"prowokacyjny","title":"...","content":"...","hashtags":[...]},{"type":"angażujący","title":"...","content":"...","hashtags":[...]}]}`;
+Kazda propozycja inny kat narracyjny:
+1. Edukacyjny - dane i liczby, lista punktow z emoji
+2. Storytelling - historia klienta, konkretna sytuacja przed/po
+3. Prowokacyjny - obalenie mitu lub kontrowersyjna teza
+4. Angażujący - pytanie otwarte, zaproszenie do dyskusji
+
+Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
+{"posts":[{"type":"edukacyjny","title":"max 5 slow","content":"tresc z enterami jako nowe linie","hashtags":["tag1","tag2","tag3"]},{"type":"storytelling","title":"...","content":"...","hashtags":[...]},{"type":"prowokacyjny","title":"...","content":"...","hashtags":[...]},{"type":"angażujący","title":"...","content":"...","hashtags":[...]}]}`;
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
