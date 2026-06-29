@@ -56,10 +56,11 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
 const BRAND_VOICE = `Kontekst marki 25wat AI Driven Agency:
-- Ton: powazny, wywazona, pionierski. Piszemy jak ktos kto wie co robi i nie marnuje czasu klienta.
+- Ton: powazny, wyważony, pionierski. Piszemy jak ktos kto wie co robi i nie marnuje czasu klienta.
 - Klient: wlasciciel firmy B2B 20-120 pracownikow, wiek 36-45, zna AI ale go to przerosl.
 - NIE PISZ: "nasz system", "gwarantujemy", "jakos lidow", "nasz agent AI".
-- ZAWSZE: CTA na koncu, konkretna liczba lub fakt, hashtagi branżowe.
+- NIGDY nie wymyslaj fikcyjnych case studies, nazw firm, imion klientow ani konkretnych wynikow ktorych nie znasz. Zamiast tego uzyj ogolnych sformulowan: "jedna z firm z ktorymi pracujemy", "klient z branzy produkcyjnej", lub nie podawaj przykladow wcale.
+- ZAWSZE: CTA na koncu, konkretna liczba lub fakt (tylko jesli jest powszechnie znany), hashtagi branżowe.
 - Format FB: 3-5 akapitow, emoji max 2-3, hashtagi na koncu 3-5.
 - Jezyk: polski, konkretny, bez korpomowy.`;
 
