@@ -54,3 +54,38 @@ app.post('/api/research/auto', async (req, res) => {
 });
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
+
+const BRAND_VOICE = `Kontekst marki 25wat AI Driven Agency:
+- Ton: powazny, wywazona, pionierski. Piszemy jak ktos kto wie co robi i nie marnuje czasu klienta.
+- Klient: wlasciciel firmy B2B 20-120 pracownikow, wiek 36-45, zna AI ale go to przerosl.
+- NIE PISZ: "nasz system", "gwarantujemy", "jakos lidow", "nasz agent AI".
+- ZAWSZE: CTA na koncu, konkretna liczba lub fakt, hashtagi branżowe.
+- Format FB: 3-5 akapitow, emoji max 2-3, hashtagi na koncu 3-5.
+- Jezyk: polski, konkretny, bez korpomowy.`;
+
+app.post('/api/content/generate', async (req, res) => {
+  const { topic } = req.body;
+  if (!topic) return res.status(400).json({ error: 'Brak tematu' });
+  try {
+    const prompt = `Napisz 4 rozne propozycje postow na Facebook dla agencji 25wat na temat: "${topic}".
+
+Kazda propozycja inny kat narracyjny:
+1. Edukacyjny (dane, fakty, lista)
+2. Storytelling (historia klienta lub przyklad)
+3. Prowokacyjny (kontrowersyjny poglad, obalenie mitu)
+4. Angażujący (pytanie do odbiorcy)
+
+Odpowiedz TYLKO JSON bez markdown bez em-dash:
+{"posts":[{"type":"edukacyjny","title":"max 5 slow","content":"tresc posta po polsku","hashtags":["tag1","tag2","tag3"]},{"type":"storytelling","title":"...","content":"...","hashtags":[...]},{"type":"prowokacyjny","title":"...","content":"...","hashtags":[...]},{"type":"angażujący","title":"...","content":"...","hashtags":[...]}]}`;
+
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, system: BRAND_VOICE, messages: [{ role: 'user', content: prompt }] })
+    });
+    if (!r.ok) { const e = await r.text(); throw new Error('Claude ' + r.status + ': ' + e); }
+    const data = await r.json();
+    const raw = (data.content.find(b => b.type === 'text')?.text || '{}').replace(/```json|```/g,'').replace(/[\u2013\u2014]/g,'-').trim();
+    res.json(JSON.parse(raw));
+  } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
+});
