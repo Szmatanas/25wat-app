@@ -146,3 +146,18 @@ Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
     res.json(JSON.parse(raw));
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
+
+app.post('/api/account/chat', async (req, res) => {
+  const { message, systemPrompt } = req.body;
+  if (!message) return res.status(400).json({ error: 'Brak wiadomości' });
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, system: systemPrompt || 'Jesteś Account Managerem w 25wat. Odpowiadasz po polsku, konkretnie.', messages: [{ role: 'user', content: message }] })
+    });
+    const data = await r.json();
+    const text = data.content?.find(b => b.type === 'text')?.text || 'Błąd';
+    res.json({ text });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
