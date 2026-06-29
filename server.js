@@ -22,7 +22,7 @@ function safeJSON(raw) {
   catch(e) { console.error('JSON err:',e.message); return {}; }
 }
 async function claude(system, context) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, system, messages: [{ role: 'user', content: 'Dane:\n' + context + '\n\nOdpowiedz TYLKO JSON po polsku. Bez em-dash, bez typograficznych cudzyslowow.' }] }) });
+  const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400, system, messages: [{ role: 'user', content: 'Dane:\n' + context + '\n\nOdpowiedz TYLKO JSON po polsku. Bez em-dash, bez typograficznych cudzyslowow.' }] }) });
   if (!res.ok) { const e = await res.text(); throw new Error('Claude ' + res.status + ': ' + e); }
   const data = await res.json();
   return safeJSON(data.content.find(b => b.type === 'text')?.text || '{}');
@@ -94,7 +94,7 @@ Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, system: BRAND_VOICE, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: BRAND_VOICE, messages: [{ role: 'user', content: prompt }] })
     });
     if (!r.ok) { const e = await r.text(); throw new Error('Claude ' + r.status + ': ' + e); }
     const data = await r.json();
