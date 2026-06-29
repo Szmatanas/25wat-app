@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: ['https://aisomeboost.vercel.app', 'https://aisomeboost.netlify.app', 'http://localhost:3000', 'http://localhost:5500'],
+  methods: ['GET', 'POST'],
+  credentials: false
+}));
 app.use(express.json({ limit: '2mb' }));
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
