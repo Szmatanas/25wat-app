@@ -143,7 +143,14 @@ Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
     if (!r.ok) { const e = await r.text(); throw new Error('Claude ' + r.status + ': ' + e); }
     const data = await r.json();
     const raw = (data.content.find(b => b.type === 'text')?.text || '{}').replace(/```json|```/g,'').replace(/[\u2013\u2014]/g,'-').trim();
-    res.json(JSON.parse(raw));
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch(e) {
+      const cleaned = raw.replace(/[\u2013\u2014]/g,'-').replace(/[\u201c\u201d\u201e\u201f]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      parsed = JSON.parse(cleaned);
+    }
+    res.json(parsed);
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
 
