@@ -56,6 +56,36 @@ app.post('/api/research/auto', async (req, res) => {
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
+
+app.post('/api/design/generate-photo', async (req, res) => {
+  const { postTitle } = req.body;
+  const prompt = `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${postTitle || 'professional B2B content'}.`;
+  try {
+    const r = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + process.env.OPENAI_API_KEY
+      },
+      body: JSON.stringify({
+        model: 'dall-e-3',
+        prompt,
+        n: 1,
+        size: '1024x1792',
+        quality: 'standard'
+      })
+    });
+    const data = await r.json();
+    if (data.data?.[0]?.url) {
+      res.json({ url: data.data[0].url });
+    } else {
+      throw new Error(data.error?.message || 'Brak URL w odpowiedzi');
+    }
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
