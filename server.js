@@ -150,7 +150,7 @@ Odpowiedz TYLKO JSON bez markdown:
       assets: {
         doodle: `/assets/graphic/doodle/${doodleFile}`,
         accent: accentFile ? `/assets/graphic/flubber/${accentFile}` : null,
-        logo: pair.bgName === 'dark' ? '/assets/logo/25wat_logo_white_vector.svg' : '/assets/logo/25wat_logo_black_vector.svg',
+        logo: pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg',
       }
     });
   } catch(e) {
