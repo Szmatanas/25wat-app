@@ -232,7 +232,7 @@ app.post('/api/design/generate-image', async (req, res) => {
 TWARDE ZASADY BRANDU (zawsze w prompcie):
 - Flat design, absolutely NO gradients, no glow, no shadows on graphic elements
 - Background: solid flat ${pair.bg} (${pair.bgName})
-- Headline text color: ${pair.text}, accent color: ${pair.accent} (${pair.accentName})
+- Headline text color: ${pair.text}. Key phrase highlight color: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only, no color highlight'} - NEVER use neon lime text on beige background (contrast rule)
 - Font style: modern geometric sans-serif (like Gilroy), headline semibold, key phrase highlighted in accent color
 - One organic blob shape ("flubber") in accent color, flat fill, containing a natural-light photo of a person in a real office setting (cutout/knockout style blending into blob)
 - One small hand-drawn doodle (underline or arrow) near the key phrase
