@@ -203,6 +203,82 @@ Odpowiedz TYLKO JSON bez markdown:
   }
 });
 
+
+app.post('/api/design/generate-image', async (req, res) => {
+  const { post, colorPairIdx } = req.body;
+  if (!post) return res.status(400).json({ error: 'Brak posta' });
+  const OPENAI_KEY = process.env.OPENAI_KEY;
+  if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
+
+  const pairs = [
+    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
+  ];
+  const pair = pairs[colorPairIdx ?? 2] || pairs[2];
+
+  try {
+    // 1. Claude pisze prompt wg brand booku
+    const promptReq = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 800,
+        system: `Piszesz prompty do generatora obrazów (gpt-image) dla agencji 25wat. Zwracasz WYŁĄCZNIE treść promptu po angielsku, nic więcej.
+
+TWARDE ZASADY BRANDU (zawsze w prompcie):
+- Flat design, absolutely NO gradients, no glow, no shadows on graphic elements
+- Background: solid flat ${pair.bg} (${pair.bgName})
+- Headline text color: ${pair.text}, accent color: ${pair.accent} (${pair.accentName})
+- Font style: modern geometric sans-serif (like Gilroy), headline semibold, key phrase highlighted in accent color
+- One organic blob shape ("flubber") in accent color, flat fill, containing a natural-light photo of a person in a real office setting (cutout/knockout style blending into blob)
+- One small hand-drawn doodle (underline or arrow) near the key phrase
+- Composition: generous whitespace (min 25%), 80px margins, headline top-left area, photo blob right side
+- NO logo anywhere, NO watermarks, NO page numbers, NO hashtags (added later as overlay)
+- Photo: natural colors, natural daylight, NO brand-color filter on photo
+- Polish text must be spelled EXACTLY as given, with correct diacritics
+- Format: vertical 4:5 social media post
+
+Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.`,
+        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` }]
+      })
+    });
+    const promptData = await promptReq.json();
+    const imagePrompt = promptData.content?.find(b => b.type === 'text')?.text;
+    if (!imagePrompt) throw new Error('Claude nie zwrócił promptu');
+
+    // 2. OpenAI generuje obraz
+    const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: imagePrompt,
+        size: '1024x1536',
+        quality: 'high',
+        n: 1
+      })
+    });
+    const imgData = await imgReq.json();
+    if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
+    const b64 = imgData.data?.[0]?.b64_json;
+    if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
+
+    res.json({
+      image: 'data:image/png;base64,' + b64,
+      prompt: imagePrompt,
+      pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
+      logo: pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg'
+    });
+  } catch(e) {
+    console.error('generate-image:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
