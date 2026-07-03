@@ -229,19 +229,23 @@ app.post('/api/design/generate-image', async (req, res) => {
         max_tokens: 800,
         system: `Piszesz prompty do generatora obrazów (gpt-image) dla agencji 25wat. Zwracasz WYŁĄCZNIE treść promptu po angielsku, nic więcej.
 
-TWARDE ZASADY BRANDU (zawsze w prompcie):
-- Flat design, absolutely NO gradients, no glow, no shadows on graphic elements
+Piszesz jak art director opisujacy GOTOWY, kompletny post - jeden plynny, obrazowy prompt, nie lista zakazow.
+
+TWARDE ZASADY BRANDU (wplec naturalnie):
+- Flat design, absolutely no gradients, no glow, no drop shadows on graphic elements
 - Background: solid flat ${pair.bg} (${pair.bgName})
-- Headline text color: ${pair.text}. Key phrase highlight color: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only, no color highlight'} - NEVER use neon lime text on beige background (contrast rule)
-- Font style: modern geometric sans-serif (like Gilroy), headline semibold, key phrase highlighted in accent color
-- One organic blob shape ("flubber") in accent color, flat fill, containing a natural-light photo of a person with a Central European appearance (typical of Poland) in a real modern Polish office setting (cutout/knockout style blending into blob)
-- One small hand-drawn doodle (underline or arrow) near the key phrase
-- Composition: generous whitespace (min 25%), 80px margins, headline top-left area, photo blob right side
-- NO logo anywhere, NO watermarks, NO page numbers, NO hashtags (added later as overlay)
-- CRITICAL: keep the top-left corner area (roughly 320x120 px) completely EMPTY and INVISIBLE - it must be pure untouched background color only. Do NOT draw any rectangle, frame, border, outline, placeholder or box there - nothing at all, just plain background (a logo will be overlaid there later). The headline must start BELOW this area
-- Photo: natural colors, natural daylight, NO brand-color filter on photo
-- Polish text must be spelled EXACTLY as given, with correct diacritics
-- Format: vertical 4:5 social media post
+- Headline text color: ${pair.text}. Key phrase highlight: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only'} - NEVER neon lime text on beige
+- Modern geometric sans-serif (Gilroy-like), headline semibold, key phrase in accent color
+- One organic flubber blob in accent color, flat fill, with knockout photo blended in: natural colors, natural daylight, no brand-color filter. Person: Central European appearance (typical of Poland), real modern office - unless user provided own photo/description
+- One small hand-drawn doodle (underline, arrow or circles) near the key phrase
+- Polish text spelled EXACTLY as given, correct diacritics
+- Vertical 4:5 social media post, generous whitespace, editorial feel
+
+ELEMENTY META (jak w prawdziwym poscie agencji - uzyj tych, ktore sluza kompozycji):
+- Small logotype ": : 25wat" (two small dots + lowercase wordmark) in ${pair.text}, top-left corner
+- Small page number like "01" top-right
+- Small uppercase hashtag bottom-left
+- Small circular accent-color CTA chip with arrow and short Polish label (e.g. "Przewin po wiecej")
 
 Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.`,
         messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (userPhoto ? '\n\nUWAGA: uzytkownik dostarczyl wlasne zdjecie - NIE opisuj osoby ani sceny na zdjeciu, napisz prompt zakladajacy ze zdjecie juz istnieje i ma byc wkomponowane w blob w niezmienionej formie (natural colors, no filter).' : photoDescription ? `\n\nOpis zdjecia od uzytkownika (uzyj go zamiast domyslnego opisu osoby w biurze): ${photoDescription}` : '') }]
@@ -288,7 +292,7 @@ Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową d
       image: 'data:image/png;base64,' + b64,
       prompt: imagePrompt,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
-      logo: pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg'
+      logo: null
     });
   } catch(e) {
     console.error('generate-image:', e.message);
