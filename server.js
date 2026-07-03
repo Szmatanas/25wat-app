@@ -238,6 +238,7 @@ TWARDE ZASADY BRANDU (zawsze w prompcie):
 - One small hand-drawn doodle (underline or arrow) near the key phrase
 - Composition: generous whitespace (min 25%), 80px margins, headline top-left area, photo blob right side
 - NO logo anywhere, NO watermarks, NO page numbers, NO hashtags (added later as overlay)
+- CRITICAL: keep the top-left corner completely EMPTY - a clear rectangle of solid background color, roughly 320x120 px, no text, no shapes, no photo there (a logo will be overlaid in that spot later). The headline must start BELOW this reserved area
 - Photo: natural colors, natural daylight, NO brand-color filter on photo
 - Polish text must be spelled EXACTLY as given, with correct diacritics
 - Format: vertical 4:5 social media post
