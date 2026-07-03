@@ -64,7 +64,7 @@ app.post('/api/research/auto', async (req, res) => {
 
 app.post('/api/design/generate-photo', async (req, res) => {
   const { postTitle } = req.body;
-  const prompt = `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${postTitle || 'professional B2B content'}.`;
+  const prompt = `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${postTitle || 'professional B2B content'}.`;
   try {
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
@@ -234,7 +234,7 @@ TWARDE ZASADY BRANDU (zawsze w prompcie):
 - Background: solid flat ${pair.bg} (${pair.bgName})
 - Headline text color: ${pair.text}. Key phrase highlight color: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only, no color highlight'} - NEVER use neon lime text on beige background (contrast rule)
 - Font style: modern geometric sans-serif (like Gilroy), headline semibold, key phrase highlighted in accent color
-- One organic blob shape ("flubber") in accent color, flat fill, containing a natural-light photo of a person in a real office setting (cutout/knockout style blending into blob)
+- One organic blob shape ("flubber") in accent color, flat fill, containing a natural-light photo of a person with a Central European appearance (typical of Poland) in a real modern Polish office setting (cutout/knockout style blending into blob)
 - One small hand-drawn doodle (underline or arrow) near the key phrase
 - Composition: generous whitespace (min 25%), 80px margins, headline top-left area, photo blob right side
 - NO logo anywhere, NO watermarks, NO page numbers, NO hashtags (added later as overlay)
