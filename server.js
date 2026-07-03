@@ -205,7 +205,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -244,25 +244,41 @@ TWARDE ZASADY BRANDU (zawsze w prompcie):
 - Format: vertical 4:5 social media post
 
 Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.`,
-        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` }]
+        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (userPhoto ? '\n\nUWAGA: uzytkownik dostarczyl wlasne zdjecie - NIE opisuj osoby ani sceny na zdjeciu, napisz prompt zakladajacy ze zdjecie juz istnieje i ma byc wkomponowane w blob w niezmienionej formie (natural colors, no filter).' : photoDescription ? `\n\nOpis zdjecia od uzytkownika (uzyj go zamiast domyslnego opisu osoby w biurze): ${photoDescription}` : '') }]
       })
     });
     const promptData = await promptReq.json();
     const imagePrompt = promptData.content?.find(b => b.type === 'text')?.text;
     if (!imagePrompt) throw new Error('Claude nie zwrócił promptu');
 
-    // 2. OpenAI generuje obraz
-    const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: imagePrompt,
-        size: '1024x1536',
-        quality: 'high',
-        n: 1
-      })
-    });
+    // 2. OpenAI generuje obraz (edit gdy user dal zdjecie, generation gdy nie)
+    let imgReq;
+    if (userPhoto) {
+      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const buf = Buffer.from(b64in, 'base64');
+      const form = new FormData();
+      form.append('model', 'gpt-image-1');
+      form.append('image', new Blob([buf], { type: 'image/png' }), 'photo.png');
+      form.append('prompt', imagePrompt + ' Integrate the provided photo into the flubber blob shape, keep the person and photo colors unchanged.');
+      form.append('size', '1024x1536');
+      imgReq = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: form
+      });
+    } else {
+      imgReq = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({
+          model: 'gpt-image-1',
+          prompt: imagePrompt,
+          size: '1024x1536',
+          quality: 'high',
+          n: 1
+        })
+      });
+    }
     const imgData = await imgReq.json();
     if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
     const b64 = imgData.data?.[0]?.b64_json;
