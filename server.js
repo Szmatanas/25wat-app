@@ -1,5 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors({
   origin: ['https://aisomeboost.vercel.app', 'https://aisomeboost.netlify.app', 'http://localhost:3000', 'http://localhost:5500'],
@@ -7,6 +11,7 @@ app.use(cors({
   credentials: false
 }));
 app.use(express.json({ limit: '2mb' }));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
 const COMPETITORS = [
@@ -82,6 +87,74 @@ app.post('/api/design/generate-photo', async (req, res) => {
       throw new Error(data.error?.message || 'Brak URL w odpowiedzi');
     }
   } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Design generation: pary kolorow (na sztywno, z rules.md) ──
+const COLOR_PAIRS = [
+  { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accentColor: '#7648F8', accentName: 'ultraviolet', doodleColor: '#D0F200', doodleName: 'neon', accentType: 'flubber' },
+  { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accentColor: '#D0F200', accentName: 'neon', doodleColor: '#7648F8', doodleName: 'ultraviolet', accentType: 'flubber' },
+  { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accentColor: '#D0F200', accentName: 'neon', doodleColor: '#7648F8', doodleName: 'ultraviolet', accentType: 'flubber' },
+  { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accentColor: '#7648F8', accentName: 'ultraviolet', doodleColor: '#D0F200', doodleName: 'neon', accentType: 'flubber' },
+  { bg: '#D0F200', bgName: 'neon', text: '#171717', accentColor: null, accentName: null, doodleColor: '#171717', doodleName: 'dark', accentType: 'none' },
+];
+const DOODLE_TYPES = ['arrow-1','arrow-2','arrow-3','circles-1','circles-2','underlines-1','underlines-2','sparkles','x-mark'];
+const FLUBBER_SHAPES = [1,2,3,4,5];
+const FORMATS = {
+  'post-1-1': { w: 1080, h: 1080, label: 'Feed 1:1' },
+  'post-4-5': { w: 1080, h: 1350, label: 'Feed 4:5' },
+  'story': { w: 1080, h: 1920, label: 'Story 9:16' },
+};
+function pick(value, allowed, fallback) { return allowed.includes(value) ? value : fallback; }
+
+app.post('/api/design/generate-brief', async (req, res) => {
+  const { post, colorPairIdx, hasPhoto, format } = req.body;
+  if (!post || !post.content) return res.status(400).json({ error: 'Brak posta' });
+  const pairIdx = Number.isInteger(colorPairIdx) && COLOR_PAIRS[colorPairIdx] ? colorPairIdx : 2;
+  const pair = COLOR_PAIRS[pairIdx];
+  const fmt = FORMATS[format] ? format : 'post-4-5';
+
+  const sys = `Jestes Art Directorem w agencji 25wat. Projektujesz grafike social media na podstawie posta, scisle wg brand booku.
+
+ZASADY (nieprzekraczalne):
+- Headline to najwazniejszy element - pierwsze co czyta odbiorca. Max 8 slow, jedna kluczowa fraza wyrozniona (heading-split).
+- Marka jest flat - zero gradientow, tylko plaskie kolory.
+- Margines 80px z kazdej strony (nie umieszczaj tekstu przy krawedzi).
+- Doodle dostepne typy: ${DOODLE_TYPES.join(', ')} - wybierz jeden pasujacy do tonu posta.
+- ${pair.accentType === 'flubber' ? 'Ksztalt flubber: wybierz numer 1-5 (1,3=zwarte/okragle, 2,4=rozciagniete/asymetryczne, 5=najbardziej plynny).' : 'Ta para kolorow nie uzywa flubbera - tylko doodle.'}
+
+Odpowiedz TYLKO JSON bez markdown:
+{"headline":"max 8 slow po polsku","headlineHighlight":"fragment headline do wyroznienia (dokladny podciag)","doodleType":"jeden z: ${DOODLE_TYPES.join('|')}","flubberShape":1}`;
+
+  try {
+    const context = `Tytul posta: ${post.title || ''}\nTyp posta: ${post.type || ''}\nTresc posta: ${post.content}`;
+    const raw = await claude(sys, context);
+    const doodleType = pick(raw.doodleType, DOODLE_TYPES, 'underlines-1');
+    const flubberShape = pick(Number(raw.flubberShape), FLUBBER_SHAPES, 1);
+    const headline = (raw.headline || post.title || '25wat').toString().slice(0, 120);
+    const headlineHighlight = (raw.headlineHighlight || '').toString().slice(0, 60);
+    const doodleFile = `doodle-${pair.doodleName}-${doodleType}.svg`;
+    const accentFile = pair.accentType === 'flubber' ? `flubber-${pair.accentName}-${flubberShape}.svg` : null;
+
+    res.json({
+      format: fmt,
+      dimensions: FORMATS[fmt],
+      background: pair.bg,
+      textColor: pair.text,
+      accentColor: pair.accentColor,
+      doodleColor: pair.doodleColor,
+      headline,
+      headlineHighlight,
+      hasPhoto: !!hasPhoto,
+      assets: {
+        doodle: `/assets/graphic/doodle/${doodleFile}`,
+        accent: accentFile ? `/assets/graphic/flubber/${accentFile}` : null,
+        logo: pair.bgName === 'dark' ? '/assets/logo/25wat_logo_white_vector.svg' : '/assets/logo/25wat_logo_black_vector.svg',
+      }
+    });
+  } catch(e) {
+    console.error(e.message);
     res.status(500).json({ error: e.message });
   }
 });
