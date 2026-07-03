@@ -106,6 +106,8 @@ const FORMATS = {
   'post-4-5': { w: 1080, h: 1350, label: 'Feed 4:5' },
   'story': { w: 1080, h: 1920, label: 'Story 9:16' },
 };
+const LAYOUTS_NO_PHOTO = ['top-heavy', 'center-split'];
+const LAYOUTS_WITH_PHOTO = ['photo-bottom', 'photo-side'];
 function pick(value, allowed, fallback) { return allowed.includes(value) ? value : fallback; }
 
 app.post('/api/design/generate-brief', async (req, res) => {
@@ -114,24 +116,29 @@ app.post('/api/design/generate-brief', async (req, res) => {
   const pairIdx = Number.isInteger(colorPairIdx) && COLOR_PAIRS[colorPairIdx] ? colorPairIdx : 2;
   const pair = COLOR_PAIRS[pairIdx];
   const fmt = FORMATS[format] ? format : 'post-4-5';
+  const allowedLayouts = hasPhoto ? LAYOUTS_WITH_PHOTO : LAYOUTS_NO_PHOTO;
 
-  const sys = `Jestes Art Directorem w agencji 25wat. Projektujesz grafike social media na podstawie posta, scisle wg brand booku.
+  const sys = `Jestes Art Directorem w agencji 25wat. Projektujesz grafike social media na podstawie posta, scisle wg brand booku, ale z realna kreatywnoscia w kompozycji - kazdy projekt ma wygladac inaczej, dopasowany do tresci i nastroju posta.
 
 ZASADY (nieprzekraczalne):
-- Headline to najwazniejszy element - pierwsze co czyta odbiorca. Max 8 slow, jedna kluczowa fraza wyrozniona (heading-split).
+- Headline to najwazniejszy element. Max 8 slow, jedna kluczowa fraza wyrozniona (heading-split).
 - Marka jest flat - zero gradientow, tylko plaskie kolory.
-- Margines 80px z kazdej strony (nie umieszczaj tekstu przy krawedzi).
+- Margines min. 80px z kazdej strony.
 - Doodle dostepne typy: ${DOODLE_TYPES.join(', ')} - wybierz jeden pasujacy do tonu posta.
 - ${pair.accentType === 'flubber' ? 'Ksztalt flubber: wybierz numer 1-5 (1,3=zwarte/okragle, 2,4=rozciagniete/asymetryczne, 5=najbardziej plynny).' : 'Ta para kolorow nie uzywa flubbera - tylko doodle.'}
+- Uklad kompozycji do wyboru: ${allowedLayouts.join(' LUB ')}. Wybierz ten, ktory lepiej pasuje do nastroju/dlugosci headline - "top-heavy"/"photo-bottom" dla spokojnych, informacyjnych postow, "center-split"/"photo-side" dla mocniejszych, bardziej dynamicznych.
 
 Odpowiedz TYLKO JSON bez markdown:
-{"headline":"max 8 slow po polsku","headlineHighlight":"fragment headline do wyroznienia (dokladny podciag)","doodleType":"jeden z: ${DOODLE_TYPES.join('|')}","flubberShape":1}`;
+{"headline":"max 8 slow po polsku","headlineHighlight":"fragment headline do wyroznienia (dokladny podciag)","doodleType":"jeden z: ${DOODLE_TYPES.join('|')}","flubberShape":1,"layout":"jeden z: ${allowedLayouts.join('|')}"}`;
 
   try {
-    const context = `Tytul posta: ${post.title || ''}\nTyp posta: ${post.type || ''}\nTresc posta: ${post.content}`;
+    const context = `Tytul posta: ${post.title || ''}
+Typ posta: ${post.type || ''}
+Tresc posta: ${post.content}`;
     const raw = await claude(sys, context);
     const doodleType = pick(raw.doodleType, DOODLE_TYPES, 'underlines-1');
     const flubberShape = pick(Number(raw.flubberShape), FLUBBER_SHAPES, 1);
+    const layout = pick(raw.layout, allowedLayouts, allowedLayouts[0]);
     const headline = (raw.headline || post.title || '25wat').toString().slice(0, 120);
     const headlineHighlight = (raw.headlineHighlight || '').toString().slice(0, 60);
     const doodleFile = `doodle-${pair.doodleName}-${doodleType}.svg`;
@@ -140,6 +147,7 @@ Odpowiedz TYLKO JSON bez markdown:
     res.json({
       format: fmt,
       dimensions: FORMATS[fmt],
+      layout,
       background: pair.bg,
       textColor: pair.text,
       accentColor: pair.accentColor,
