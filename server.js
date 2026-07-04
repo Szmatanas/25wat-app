@@ -205,7 +205,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -218,6 +218,10 @@ app.post('/api/design/generate-image', async (req, res) => {
     { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
+  const wantsPhoto = hasPhoto !== false;
+  const photoInstruction = wantsPhoto
+    ? 'One organic flubber blob in accent color, flat fill, with knockout photo blended in: natural colors, natural daylight, no brand-color filter. Person: Central European appearance (typical of Poland), real modern office - unless user provided own photo/description'
+    : 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout';
 
   try {
     // 1. Claude pisze prompt wg brand booku
@@ -236,7 +240,7 @@ TWARDE ZASADY BRANDU (wplec naturalnie):
 - Background: solid flat ${pair.bg} (${pair.bgName})
 - Headline text color: ${pair.text}. Key phrase highlight: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only'} - NEVER neon lime text on beige
 - Modern geometric sans-serif (Gilroy-like), headline semibold, key phrase in accent color
-- One organic flubber blob in accent color, flat fill, with knockout photo blended in: natural colors, natural daylight, no brand-color filter. Person: Central European appearance (typical of Poland), real modern office - unless user provided own photo/description
+- ${photoInstruction}
 - One small hand-drawn doodle (underline, arrow or circles) near the key phrase
 - Polish text spelled EXACTLY as given, correct diacritics
 - Vertical 4:5 social media post, generous whitespace, editorial feel
