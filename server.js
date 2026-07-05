@@ -205,7 +205,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -251,7 +251,7 @@ ELEMENTY META (jak w prawdziwym poscie agencji - uzyj tych, ktore sluza kompozyc
 - Small uppercase hashtag bottom-left
 - Small circular accent-color CTA chip with arrow and short Polish label (e.g. "Przewin po wiecej")
 
-Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.`,
+${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkownika (nie zmieniaj tresci, mozesz tylko wybrac fraze do wyroznienia akcentem): "${customHeadline}"` : 'Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.'}`,
         messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (userPhoto ? '\n\nUWAGA: uzytkownik dostarczyl wlasne zdjecie - NIE opisuj osoby ani sceny na zdjeciu, napisz prompt zakladajacy ze zdjecie juz istnieje i ma byc wkomponowane w blob w niezmienionej formie (natural colors, no filter).' : photoDescription ? `\n\nOpis zdjecia od uzytkownika (uzyj go zamiast domyslnego opisu osoby w biurze): ${photoDescription}` : '') }]
       })
     });
