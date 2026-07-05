@@ -10,7 +10,7 @@ app.use(cors({
   methods: ['GET', 'POST'],
   credentials: false
 }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '15mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
