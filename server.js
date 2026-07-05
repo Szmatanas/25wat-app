@@ -73,18 +73,18 @@ app.post('/api/design/generate-photo', async (req, res) => {
         'Authorization': 'Bearer ' + process.env.OPENAI_KEY
       },
       body: JSON.stringify({
-        model: 'dall-e-3',
+        model: 'gpt-image-1',
         prompt,
         n: 1,
-        size: '1024x1792',
-        quality: 'standard'
+        size: '1024x1536',
+        quality: 'high'
       })
     });
     const data = await r.json();
-    if (data.data?.[0]?.url) {
-      res.json({ url: data.data[0].url });
+    if (data.data?.[0]?.b64_json) {
+      res.json({ url: 'data:image/png;base64,' + data.data[0].b64_json });
     } else {
-      throw new Error(data.error?.message || 'Brak URL w odpowiedzi');
+      throw new Error(data.error?.message || 'Brak obrazu w odpowiedzi');
     }
   } catch(e) {
     res.status(500).json({ error: e.message });
