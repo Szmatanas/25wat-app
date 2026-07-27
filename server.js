@@ -222,7 +222,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, removeBackground } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, removeBackground, generatePhotoAI } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -239,7 +239,7 @@ app.post('/api/design/generate-image', async (req, res) => {
   const photoInstruction = !wantsPhoto
     ? 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout'
     : removeBackground
-      ? 'Render one organic flubber blob in accent color, flat solid fill, anchored to the bottom-right corner, bleeding off the canvas edge - a real visible graphic shape, not a placeholder. No photo, no person rendered by you: leave the area above and around the blob as plain flat background, reserved for a photo cutout to be composited on top afterward, allowed to overlap the blob.'
+      ? 'No photo, no person, no flubber blob rendered by you. Leave the bottom-right region (roughly 67% of canvas width, 62% of canvas height - starting at about 32% from the left edge and 36% from the top edge, extending all the way to the bottom-right corner) as plain flat background - absolutely no headline, no body copy, no hashtag, no doodle, no logo inside that region, it is reserved empty space for a photo cutout to be composited on top afterward. Keep ALL text elements (headline, body copy, hashtag, CTA chip) strictly within the remaining left ~32% column of the canvas, or above the 36% height line.'
       : 'No photo rendered by you. Leave the top-right region (roughly 55% of canvas width, 40% of canvas height, starting near the top edge) as plain flat background - no text, no logo, no doodle there - reserved empty space for a photo to be composited afterward by another process';
 
   try {
@@ -295,11 +295,28 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
     let b64 = imgData.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
 
-    // 3. Wkomponuj prawdziwe zdjecie usera lokalnie (flubber blob albo zwykly kadr dla pary 'dark')
-    if (userPhoto && wantsPhoto) {
+    // 3. Zdobadz zdjecie: wgrane przez uzytkownika, albo wygenerowane przez AI, albo brak
+    let rawPhoto = null;
+    if (userPhoto) {
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const rawPhoto = Buffer.from(b64in, 'base64');
+      rawPhoto = Buffer.from(b64in, 'base64');
+    } else if (wantsPhoto && generatePhotoAI) {
+      const photoPrompt = `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${photoDescription || post.title || 'professional B2B content'}.`;
+      const photoReq = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({ model: 'gpt-image-1', prompt: photoPrompt, n: 1, size: '1024x1536', quality: 'high' })
+      });
+      const photoData = await photoReq.json();
+      if (photoData.data?.[0]?.b64_json) {
+        rawPhoto = Buffer.from(photoData.data[0].b64_json, 'base64');
+      } else {
+        throw new Error('Nie udalo sie wygenerowac zdjecia AI: ' + (photoData.error?.message || 'brak obrazu'));
+      }
+    }
 
+    // 4. Wkomponuj zdjecie lokalnie (flubber blob albo zwykly kadr dla pary 'dark')
+    if (rawPhoto && wantsPhoto) {
       if (removeBackground) {
         if (!REMOVE_BG_KEY) throw new Error('Brak REMOVE_BG_KEY na serwerze');
         const cutoutBuf = await removeBg(rawPhoto);
