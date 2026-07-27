@@ -263,8 +263,7 @@ TWARDE ZASADY BRANDU (wplec naturalnie):
 - Vertical 4:5 social media post, generous whitespace, editorial feel
 
 ELEMENTY META (jak w prawdziwym poscie agencji - uzyj tych, ktore sluza kompozycji):
-- Small logotype ": : 25wat" (two small dots + lowercase wordmark) in ${pair.text}, top-left corner
-- Small page number like "01" top-right
+- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) completely blank flat background - absolutely no logo, no text, no shapes there, reserved for a real logo to be overlaid afterward by another process
 - Small uppercase hashtag bottom-left
 - Small circular accent-color CTA chip with arrow and short Polish label (e.g. "Przewin po wiecej")
 
@@ -347,6 +346,16 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
         .toBuffer();
       b64 = composited.toString('base64');
     }
+
+    // Naloz prawdziwe logo SVG zamiast pozwalac GPT je rysowac (halucynacje na tekscie logo)
+    const logoFile = pair.bgName === 'dark' ? 'primary-logo-25wat-light.svg' : 'primary-logo-25wat-dark.svg';
+    const logoPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/logo', logoFile);
+    const logoBuf = await sharp(fs.readFileSync(logoPath)).resize({ height: 44 }).png().toBuffer();
+    const withLogo = await sharp(Buffer.from(b64, 'base64'))
+      .composite([{ input: logoBuf, top: 60, left: 60 }])
+      .png()
+      .toBuffer();
+    b64 = withLogo.toString('base64');
 
     res.json({
       image: 'data:image/png;base64,' + b64,
