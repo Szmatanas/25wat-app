@@ -16,6 +16,7 @@ app.use(express.json({ limit: '15mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
+const REMOVE_BG_KEY = process.env.REMOVE_BG_KEY || '';
 const COMPETITORS = [
   { name: 'Sellwise', query: 'Sellwise Szymon Negacz social media content 2026' },
   { name: 'Automation House', query: 'Automation House agencja AI Polska content 2026' },
@@ -38,6 +39,20 @@ async function claude(system, context) {
   const data = await res.json();
   return safeJSON(data.content.find(b => b.type === 'text')?.text || '{}');
 }
+async function removeBg(buf) {
+  const form = new FormData();
+  form.append('image_file', new Blob([buf]), 'photo.png');
+  form.append('size', 'auto');
+  const r = await fetch('https://api.remove.bg/v1.0/removebg', {
+    method: 'POST',
+    headers: { 'X-Api-Key': REMOVE_BG_KEY },
+    body: form
+  });
+  if (!r.ok) { const e = await r.text(); throw new Error('remove.bg ' + r.status + ': ' + e); }
+  const ab = await r.arrayBuffer();
+  return Buffer.from(ab);
+}
+
 app.get('/', (req, res) => res.json({ status: 'ok' }));
 app.post('/api/research', async (req, res) => {
   const { query } = req.body;
@@ -207,7 +222,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, removeBackground } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -221,9 +236,11 @@ app.post('/api/design/generate-image', async (req, res) => {
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false;
-  const photoInstruction = wantsPhoto
-    ? 'No photo rendered by you. Leave the top-right region (roughly 55% of canvas width, 40% of canvas height, starting near the top edge) as plain flat background - no text, no logo, no doodle there - reserved empty space for a photo to be composited afterward by another process'
-    : 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout';
+  const photoInstruction = !wantsPhoto
+    ? 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout'
+    : removeBackground
+      ? 'Render one organic flubber blob in accent color, flat solid fill, anchored to the bottom-right corner, bleeding off the canvas edge - a real visible graphic shape, not a placeholder. No photo, no person rendered by you: leave the area above and around the blob as plain flat background, reserved for a photo cutout to be composited on top afterward, allowed to overlap the blob.'
+      : 'No photo rendered by you. Leave the top-right region (roughly 55% of canvas width, 40% of canvas height, starting near the top edge) as plain flat background - no text, no logo, no doodle there - reserved empty space for a photo to be composited afterward by another process';
 
   try {
     // 1. Claude pisze prompt wg brand booku
@@ -280,34 +297,54 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
 
     // 3. Wkomponuj prawdziwe zdjecie usera lokalnie (flubber blob albo zwykly kadr dla pary 'dark')
     if (userPhoto && wantsPhoto) {
-      const CANVAS_W = 1024, REGION_W = 560, REGION_H = 600, MARGIN = 48;
-      const REGION_TOP = MARGIN, REGION_LEFT = CANVAS_W - REGION_W - MARGIN;
-
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
       const rawPhoto = Buffer.from(b64in, 'base64');
-      const photoResized = await sharp(rawPhoto)
-        .resize(REGION_W, REGION_H, { fit: 'cover' })
-        .png()
-        .toBuffer();
 
-      let photoLayer = photoResized;
-      if (pair.accentName !== 'dark') {
-        const folder = pair.accentName === 'ultraviolet' ? 'ultraviolet' : 'neon';
-        const svgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/graphic/flubber', `flubber-${folder}-1.svg`);
-        let svgText = fs.readFileSync(svgPath, 'utf8').replace(/fill="#[A-Fa-f0-9]+"/, 'fill="#FFFFFF"');
-        const maskBuf = await sharp(Buffer.from(svgText)).resize(REGION_W, REGION_H).png().toBuffer();
-        photoLayer = await sharp(photoResized)
-          .composite([{ input: maskBuf, blend: 'dest-in' }])
+      if (removeBackground) {
+        if (!REMOVE_BG_KEY) throw new Error('Brak REMOVE_BG_KEY na serwerze');
+        const cutoutBuf = await removeBg(rawPhoto);
+        const CANVAS_W = 1024, CANVAS_H = 1536;
+        const PHOTO_H = 950, PHOTO_W = Math.round(PHOTO_H * 0.72);
+        const photoResized = await sharp(cutoutBuf)
+          .resize(PHOTO_W, PHOTO_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .png()
           .toBuffer();
-      }
+        const LEFT = CANVAS_W - PHOTO_W - 10;
+        const TOP = CANVAS_H - PHOTO_H - 30;
+        const bgBuf = Buffer.from(b64, 'base64');
+        const composited = await sharp(bgBuf)
+          .composite([{ input: photoResized, top: TOP, left: LEFT }])
+          .png()
+          .toBuffer();
+        b64 = composited.toString('base64');
+      } else {
+        const CANVAS_W = 1024, REGION_W = 560, REGION_H = 600, MARGIN = 48;
+        const REGION_TOP = MARGIN, REGION_LEFT = CANVAS_W - REGION_W - MARGIN;
 
-      const bgBuf = Buffer.from(b64, 'base64');
-      const composited = await sharp(bgBuf)
-        .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
-        .png()
-        .toBuffer();
-      b64 = composited.toString('base64');
+        const photoResized = await sharp(rawPhoto)
+          .resize(REGION_W, REGION_H, { fit: 'cover' })
+          .png()
+          .toBuffer();
+
+        let photoLayer = photoResized;
+        if (pair.accentName !== 'dark') {
+          const folder = pair.accentName === 'ultraviolet' ? 'ultraviolet' : 'neon';
+          const svgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/graphic/flubber', `flubber-${folder}-1.svg`);
+          let svgText = fs.readFileSync(svgPath, 'utf8').replace(/fill="#[A-Fa-f0-9]+"/, 'fill="#FFFFFF"');
+          const maskBuf = await sharp(Buffer.from(svgText)).resize(REGION_W, REGION_H).png().toBuffer();
+          photoLayer = await sharp(photoResized)
+            .composite([{ input: maskBuf, blend: 'dest-in' }])
+            .png()
+            .toBuffer();
+        }
+
+        const bgBuf = Buffer.from(b64, 'base64');
+        const composited = await sharp(bgBuf)
+          .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
+          .png()
+          .toBuffer();
+        b64 = composited.toString('base64');
+      }
     }
 
     res.json({
