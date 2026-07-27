@@ -309,6 +309,7 @@ Hard rules:
 - Headline text color otherwise: ${pair.text}
 - Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no text, no logo there - reserved for a real logo to be overlaid afterward
 - Do not draw any page numbers or slide numbers anywhere
+- CRITICAL: any illustration, doodle, icon or decorative shape must NEVER touch, overlap, or visually cross the headline text or the highlighted phrase. Keep at least a clear gap between text and any decorative element, even outside the reserved photo zone.
 ${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements'}
 - Polish text spelled EXACTLY as given, correct diacritics`;
 
