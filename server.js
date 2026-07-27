@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -263,7 +264,8 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
     let imgReq;
     if (userPhoto) {
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const buf = Buffer.from(b64in, 'base64');
+      const rawBuf = Buffer.from(b64in, 'base64');
+      const buf = await sharp(rawBuf).png().toBuffer();
       const form = new FormData();
       form.append('model', 'gpt-image-1');
       form.append('image', new Blob([buf], { type: 'image/png' }), 'photo.png');
