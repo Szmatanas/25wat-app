@@ -246,7 +246,7 @@ Hard rules:
 - Leave a small blank rectangle in the top-left corner (roughly 220x70px) completely empty - no logo, no text, no shapes there, a real logo will be composited afterward by another process
 - Do not draw any page numbers or slide numbers anywhere
 - Polish text spelled EXACTLY as given below, correct diacritics
-${wantsPhoto && userPhoto ? '- A real photo of a person is attached as one of the input images - integrate them naturally into the composition exactly as photographed, keep their face and likeness completely unchanged and clearly recognizable, do not redraw, restyle or replace the person' : ''}
+${wantsPhoto && userPhoto ? '- A real photo of a person is attached as one of the input images - integrate them naturally into the composition exactly as photographed, keep their face and likeness completely unchanged and clearly recognizable, this is a real specific photograph - use the exact uploaded pixels of this person unchanged, do not generate a new or similar-looking face, do not redraw, restyle or replace the person' : ''}
 ${!wantsPhoto ? '- No photo, no person - pure typographic composition with generous whitespace' : ''}
 
 ${customHeadline ? `Use exactly this headline text, do not change the wording, you may only choose which phrase to highlight: "${customHeadline}"` : `Post content to design (extract a short headline, max 8 words, and pick one key phrase to highlight):\n${post.title || ''}\n${post.content || ''}`}
@@ -255,11 +255,15 @@ ${photoDescription ? `Photo context: ${photoDescription}` : ''}`;
   try {
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
     let exampleFiles = [];
-    try {
-      const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
-      exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
-      if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
-    } catch(e) { exampleFiles = []; }
+    // Gdy user dal wlasne zdjecie - NIE wysylamy referencji brandowych, zeby GPT
+    // nie mieszal twarzy usera z innymi obrazami. Zdjecie usera ma byc jedyna baza edycji.
+    if (!(userPhoto && wantsPhoto)) {
+      try {
+        const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
+        exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
+        if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
+      } catch(e) { exampleFiles = []; }
+    }
 
     const form = new FormData();
     form.append('model', 'gpt-image-1');
