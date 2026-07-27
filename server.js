@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -221,7 +222,7 @@ app.post('/api/design/generate-image', async (req, res) => {
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false;
   const photoInstruction = wantsPhoto
-    ? 'One organic flubber blob in accent color, flat fill, with knockout photo blended in: natural colors, natural daylight, no brand-color filter. Person: Central European appearance (typical of Poland), real modern office - unless user provided own photo/description'
+    ? 'No photo rendered by you. Leave the top-right region (roughly 55% of canvas width, 40% of canvas height, starting near the top edge) as plain flat background - no text, no logo, no doodle there - reserved empty space for a photo to be composited afterward by another process'
     : 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout';
 
   try {
@@ -260,39 +261,54 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
     const imagePrompt = promptData.content?.find(b => b.type === 'text')?.text;
     if (!imagePrompt) throw new Error('Claude nie zwrócił promptu');
 
-    // 2. OpenAI generuje obraz (edit gdy user dal zdjecie, generation gdy nie)
-    let imgReq;
-    if (userPhoto) {
-      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const rawBuf = Buffer.from(b64in, 'base64');
-      const buf = await sharp(rawBuf).png().toBuffer();
-      const form = new FormData();
-      form.append('model', 'gpt-image-1');
-      form.append('image', new Blob([buf], { type: 'image/png' }), 'photo.png');
-      form.append('prompt', imagePrompt + ' Integrate the provided photo into the flubber blob shape, keep the person and photo colors unchanged.');
-      form.append('size', '1024x1536');
-      imgReq = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-        body: form
-      });
-    } else {
-      imgReq = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-        body: JSON.stringify({
-          model: 'gpt-image-1',
-          prompt: imagePrompt,
-          size: '1024x1536',
-          quality: 'high',
-          n: 1
-        })
-      });
-    }
+    // 2. OpenAI generuje TYLKO tlo + typografie (zdjecie komponujemy lokalnie przez sharp)
+    const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: imagePrompt,
+        size: '1024x1536',
+        quality: 'high',
+        n: 1
+      })
+    });
     const imgData = await imgReq.json();
     if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
-    const b64 = imgData.data?.[0]?.b64_json;
+    let b64 = imgData.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
+
+    // 3. Wkomponuj prawdziwe zdjecie usera lokalnie (flubber blob albo zwykly kadr dla pary 'dark')
+    if (userPhoto && wantsPhoto) {
+      const CANVAS_W = 1024, REGION_W = 560, REGION_H = 600, MARGIN = 48;
+      const REGION_TOP = MARGIN, REGION_LEFT = CANVAS_W - REGION_W - MARGIN;
+
+      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const rawPhoto = Buffer.from(b64in, 'base64');
+      const photoResized = await sharp(rawPhoto)
+        .resize(REGION_W, REGION_H, { fit: 'cover' })
+        .png()
+        .toBuffer();
+
+      let photoLayer = photoResized;
+      if (pair.accentName !== 'dark') {
+        const folder = pair.accentName === 'ultraviolet' ? 'ultraviolet' : 'neon';
+        const svgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/graphic/flubber', `flubber-${folder}-1.svg`);
+        let svgText = fs.readFileSync(svgPath, 'utf8').replace(/fill="#[A-Fa-f0-9]+"/, 'fill="#FFFFFF"');
+        const maskBuf = await sharp(Buffer.from(svgText)).resize(REGION_W, REGION_H).png().toBuffer();
+        photoLayer = await sharp(photoResized)
+          .composite([{ input: maskBuf, blend: 'dest-in' }])
+          .png()
+          .toBuffer();
+      }
+
+      const bgBuf = Buffer.from(b64, 'base64');
+      const composited = await sharp(bgBuf)
+        .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
+        .png()
+        .toBuffer();
+      b64 = composited.toString('base64');
+    }
 
     res.json({
       image: 'data:image/png;base64,' + b64,
