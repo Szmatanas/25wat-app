@@ -260,6 +260,7 @@ app.post('/api/design/generate-image', async (req, res) => {
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
+  const integratedPhoto = wantsPhoto && !!req.body.integratedPhoto;
 
   try {
     // 1. Claude tworzy creative brief - jeden ostry pomysl, nie opis firmy
@@ -310,7 +311,8 @@ Hard rules:
 - Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no text, no logo there - reserved for a real logo to be overlaid afterward
 - Do not draw any page numbers or slide numbers anywhere
 - CRITICAL: any illustration, doodle, icon or decorative shape must NEVER touch, overlap, or visually cross the headline text or the highlighted phrase. Keep at least a clear gap between text and any decorative element, even outside the reserved photo zone.
-${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements'}
+- CRITICAL: the reserved photo zone described below must stay completely empty flat background color - no illustration, doodle, prop, sign, or any part of a decorative shape may extend, hang, or bleed into it, even partially. Treat its boundary exactly like the edge of the canvas.
+${integratedPhoto ? '- The LAST attached reference image is a real photo of the person featured in this post. Preserve their face and identity with very high fidelity, exactly as shown - do not alter, stylize, or redraw their face or appearance. Design the entire composition (colors, flubber blob shape, doodle accents, layout, headline placement) around this exact photo as the hero of the piece, the way a magazine editorial integrates a real portrait into a designed page.' : (wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements')}
 - Polish text spelled EXACTLY as given, correct diacritics`;
 
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
@@ -325,9 +327,15 @@ ${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic comp
     if (exampleFiles.length > 0) {
       const form = new FormData();
       form.append('model', 'gpt-image-1');
-      for (const f of exampleFiles) {
+      const filesToSend = integratedPhoto ? exampleFiles.slice(0, 1) : exampleFiles;
+      for (const f of filesToSend) {
         const buf = await sharp(fs.readFileSync(path.join(EXAMPLES_DIR, f))).resize(1024, 1536, { fit: 'inside' }).png().toBuffer();
         form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+      }
+      if (integratedPhoto) {
+        const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+        const rawPhoto = Buffer.from(b64in, 'base64');
+        form.append('image[]', new Blob([rawPhoto], { type: 'image/jpeg' }), 'real_photo.jpg');
       }
       form.append('prompt', brandBrief);
       form.append('size', '1024x1536');
@@ -353,8 +361,8 @@ ${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic comp
     }
     if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
 
-    // 3. Wklej prawdziwe zdjecie usera lokalnie jako sylwetke, geometria zalezna od wybranego archetypu
-    if (wantsPhoto) {
+    // 3. Wklej prawdziwe zdjecie usera lokalnie jako sylwetke (pomijamy gdy GPT juz narysowal prawdziwe zdjecie - integratedPhoto)
+    if (wantsPhoto && !integratedPhoto) {
       const CANVAS_W = 1024, CANVAS_H = 1536;
       const region = archetype.region(CANVAS_W, CANVAS_H);
 
@@ -403,7 +411,7 @@ ${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic comp
       image: 'data:image/png;base64,' + b64,
       prompt: brandBrief,
       brief,
-      layout: wantsPhoto ? archetypeKey : null,
+      layout: integratedPhoto ? 'integrated-photo' : (wantsPhoto ? archetypeKey : null),
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       logo: null
     });
