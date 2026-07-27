@@ -332,6 +332,7 @@ ${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic comp
       form.append('prompt', brandBrief);
       form.append('size', '1024x1536');
       form.append('quality', 'high');
+      form.append('input_fidelity', 'high');
       const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
