@@ -221,6 +221,30 @@ Odpowiedz TYLKO JSON bez markdown:
 });
 
 
+const PHOTO_ARCHETYPES = {
+  'text-left-photo-right': {
+    prompt: 'LAYOUT: all text elements (headline, subheadline, stats, list items, CTA) must live entirely within a LEFT column occupying roughly the left 58% of the canvas width, full height, with generous margins. The RIGHT 42% of the canvas width, full height, must remain pure flat background color - absolutely no text, no letters, no shapes there. This right column is reserved for a photo cutout with an organic flubber blob accent shape behind it, to be composited afterward by another process. Treat the boundary between the two columns like the edge of the canvas.',
+    region: (W, H) => ({ w: Math.round(W * 0.42), h: H - 160, left: W - Math.round(W * 0.42) - 40, top: 120 }),
+    position: 'bottom'
+  },
+  'headline-top-photo-bottom': {
+    prompt: 'LAYOUT: all text elements must fit ENTIRELY within the TOP 55% of the canvas height. The bottom 45% of the canvas, across its full width, must remain completely empty flat background color - absolutely no text, no letters, no doodles, no shapes may extend into this bottom band even partially. This bottom band is reserved for a real photograph to be composited afterward. Treat this bottom band exactly like the edge of the canvas.',
+    region: (W, H) => ({ w: Math.round(W * 0.62), h: Math.round(H * 0.45) - 40, left: W - Math.round(W * 0.62) - 40, top: H - (Math.round(H * 0.45) - 40) - 40 }),
+    position: 'bottom'
+  },
+  'photo-center-text-around': {
+    prompt: 'LAYOUT: leave a rectangular area in the vertical middle of the canvas, roughly 50% of canvas width and 42% of canvas height, centered horizontally, completely empty flat background color - no text, no shapes there. Headline text goes above this area, supporting text or CTA goes below it. This central area is reserved for a photo cutout to be composited afterward.',
+    region: (W, H) => ({ w: Math.round(W * 0.5), h: Math.round(H * 0.42), left: Math.round(W * 0.25), top: Math.round(H * 0.30) }),
+    position: 'center'
+  },
+  'typography-hero-small-photo': {
+    prompt: 'LAYOUT: huge bold typography dominates almost the entire canvas as the hero element. Leave one small square area, no larger than roughly 26% of canvas width, in the bottom-right corner completely empty flat background color - no text, no shapes there. This small area is reserved for a small circular or rounded-square photo cutout, a human accent, not the main focus.',
+    region: (W, H) => { const s = Math.round(W * 0.26); return { w: s, h: s, left: W - s - 50, top: H - s - 50 }; },
+    position: 'center'
+  }
+};
+const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
+
 app.post('/api/design/generate-image', async (req, res) => {
   const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
@@ -237,22 +261,57 @@ app.post('/api/design/generate-image', async (req, res) => {
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
 
-  const brandBrief = `Design a vertical 4:5 social media post for 25wat, a Polish AI/marketing agency, matching EXACTLY the visual brand style shown in the attached reference images (flat design, no gradients, no drop shadows, bold geometric sans-serif type, organic flubber blob accents, hand-drawn doodle accents).
+  try {
+    // 1. Claude tworzy creative brief - jeden ostry pomysl, nie opis firmy
+    const briefSys = `Jestes Creative Directorem w agencji 25wat. Twoim zadaniem NIE jest podsumowac posta - masz wymyslic JEDEN mocny, konkretny insight wizualny, ktory da sie zaprojektowac.
+
+Zly headline: "Jestesmy agencja kreatywna dla firm, ktore chca rosnac szybciej" (opis firmy, nic do zaprojektowania).
+Dobry headline: "Procesy nie jadaja na urlop." (konkretny obraz, kontrast, cos do zilustrowania).
+
+Zasady headline:
+- max 3 linie, kazda linia krotka (2-5 slow)
+- konkret / kontrast / obraz - nie ogolnik o marce czy branzy
+- jedna fraza do wyroznienia kolorem akcentu
+
+${wantsPhoto ? `Wybierz layout z listy (dopasuj do tresci i nastroju): ${ARCHETYPE_KEYS.join(', ')}.` : ''}
+
+Odpowiedz TYLKO JSON bez markdown:
+{"coreIdea":"jednym zdaniem po polsku, o co naprawde chodzi w tym poscie","headline":"max 3 linie po polsku, konkretny obraz nie opis firmy","highlight":"fraza z headline do wyroznienia akcentem","visualMetaphor":"krotki opis po angielsku, jaki element graficzny/doodle ilustruje ta idee"${wantsPhoto ? `,"layout":"jeden z: ${ARCHETYPE_KEYS.join('|')}"` : ''}}`;
+
+    const briefReq = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 500,
+        system: briefSys,
+        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (customHeadline ? `\n\nUZYJ DOKLADNIE tego headline, nie zmieniaj tresci: "${customHeadline}"` : '') + (photoDescription ? `\n\nKontekst zdjecia: ${photoDescription}` : '') }]
+      })
+    });
+    const briefData = await briefReq.json();
+    const briefRaw = briefData.content?.find(b => b.type === 'text')?.text || '{}';
+    const brief = safeJSON(briefRaw);
+    if (!brief.headline) throw new Error('Claude nie zwrocil brief-u');
+
+    const archetypeKey = wantsPhoto && PHOTO_ARCHETYPES[brief.layout] ? brief.layout : ARCHETYPE_KEYS[0];
+    const archetype = PHOTO_ARCHETYPES[archetypeKey];
+
+    // 2. Zbuduj finalny prompt do GPT Image na bazie brief-u (opisowy, jak art director, nie lista zakazow)
+    const brandBrief = `Design a vertical 4:5 social media post for 25wat, a Polish AI/marketing agency, matching EXACTLY the visual brand style shown in the attached reference images (flat design, no gradients, no drop shadows, bold geometric sans-serif type, organic flubber blob accents, hand-drawn doodle accents).
+
+Core idea to illustrate: ${brief.coreIdea}
+Visual metaphor / accent: ${brief.visualMetaphor || 'a simple hand-drawn doodle near the key phrase'}
 
 Hard rules:
 - Solid flat background color: ${pair.bg} (${pair.bgName})
-- Headline text color: ${pair.text}. Highlight one key phrase in ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold, same color'}
-- One small hand-drawn doodle accent (underline, arrow or circles) near the key phrase
-- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no boxes, no text, no logo there - reserved for a real logo to be overlaid afterward
+- Headline (exact text, do not change wording, keep the line breaks as natural short lines): "${brief.headline}"
+- Highlight this exact phrase in ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold, same color'}: "${brief.highlight || ''}"
+- Headline text color otherwise: ${pair.text}
+- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no text, no logo there - reserved for a real logo to be overlaid afterward
 - Do not draw any page numbers or slide numbers anywhere
-- Polish text spelled EXACTLY as given below, correct diacritics
-${wantsPhoto ? '- CRITICAL LAYOUT CONSTRAINT: all headline text, all doodles and all other content must fit ENTIRELY within the TOP 55% of the canvas height. The bottom 45% of the canvas, across its full width, must remain completely empty flat background color - absolutely no text, no letters, no doodles, no shapes may extend into this bottom band even partially. This bottom band is reserved for a real photograph to be pasted in afterward by another process. Treat this bottom band exactly like the edge of the canvas - nothing is allowed to cross into it.' : ''}
-${!wantsPhoto ? '- No photo, no person - pure typographic composition with generous whitespace' : ''}
+${wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements'}
+- Polish text spelled EXACTLY as given, correct diacritics`;
 
-${customHeadline ? `Use exactly this headline text, do not change the wording, you may only choose which phrase to highlight: "${customHeadline}"` : `Post content to design (extract a short headline, max 8 words, and pick one key phrase to highlight):\n${post.title || ''}\n${post.content || ''}`}
-${photoDescription ? `Context: ${photoDescription}` : ''}`;
-
-  try {
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
     let exampleFiles = [];
     try {
@@ -290,16 +349,12 @@ ${photoDescription ? `Context: ${photoDescription}` : ''}`;
       if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
       b64 = imgData.data?.[0]?.b64_json;
     }
-    if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
+    if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
 
-    // Wklej prawdziwe zdjecie usera lokalnie jako sylwetke (remove.bg) zamiast twardego prostokata
+    // 3. Wklej prawdziwe zdjecie usera lokalnie jako sylwetke, geometria zalezna od wybranego archetypu
     if (wantsPhoto) {
       const CANVAS_W = 1024, CANVAS_H = 1536;
-      const BAND_TOP = Math.round(CANVAS_H * 0.55);
-      const BAND_H = CANVAS_H - BAND_TOP;
-      const MARGIN_R = 40, MARGIN_B = 40;
-      const REGION_W = Math.round(CANVAS_W * 0.62);
-      const REGION_H = BAND_H - MARGIN_B;
+      const region = archetype.region(CANVAS_W, CANVAS_H);
 
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
       const rawPhoto = Buffer.from(b64in, 'base64');
@@ -309,28 +364,26 @@ ${photoDescription ? `Context: ${photoDescription}` : ''}`;
         const cutoutBuf = await removeBg(rawPhoto);
         const trimmed = await sharp(cutoutBuf).trim().toBuffer();
         photoLayer = await sharp(trimmed)
-          .resize(REGION_W, REGION_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: 'bottom' })
+          .resize(region.w, region.h, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: archetype.position })
           .png()
           .toBuffer();
       } catch(e) {
         console.error('removeBg fallback:', e.message);
         photoLayer = await sharp(rawPhoto)
-          .resize(REGION_W, REGION_H, { fit: 'cover' })
+          .resize(region.w, region.h, { fit: 'cover' })
           .png()
           .toBuffer();
       }
 
-      const REGION_LEFT = CANVAS_W - REGION_W - MARGIN_R;
-      const REGION_TOP = CANVAS_H - REGION_H - MARGIN_B;
       const bgBuf = Buffer.from(b64, 'base64');
       const composited = await sharp(bgBuf)
-        .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
+        .composite([{ input: photoLayer, top: region.top, left: region.left }])
         .png()
         .toBuffer();
       b64 = composited.toString('base64');
     }
 
-    // Nadpisz obszar logo wlasnym tlem w kolorze brandu (na wypadek gdyby GPT cos tam narysowal), potem realne logo SVG
+    // 4. Nadpisz obszar logo wlasnym tlem w kolorze brandu, potem realne logo SVG
     const bgColorBuf = await sharp({ create: { width: 220, height: 70, channels: 4, background: pair.bg } }).png().toBuffer();
     const logoFile = pair.bgName === 'dark' ? 'primary-logo-25wat-light.svg' : 'primary-logo-25wat-dark.svg';
     const logoPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/logo', logoFile);
@@ -347,6 +400,8 @@ ${photoDescription ? `Context: ${photoDescription}` : ''}`;
     res.json({
       image: 'data:image/png;base64,' + b64,
       prompt: brandBrief,
+      brief,
+      layout: wantsPhoto ? archetypeKey : null,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       logo: null
     });
