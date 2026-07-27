@@ -273,10 +273,10 @@ Zasady headline:
 - konkret / kontrast / obraz - nie ogolnik o marce czy branzy
 - jedna fraza do wyroznienia kolorem akcentu
 
-${wantsPhoto ? `Wybierz layout z listy (dopasuj do tresci i nastroju): ${ARCHETYPE_KEYS.join(', ')}.` : ''}
+${wantsPhoto ? `Zdecyduj najpierw photoProminence: "hero" jesli osoba/jej historia jest centralna dla posta (zdjecie ma wtedy zajmowac duzy obszar kompozycji), "accent" jesli zdjecie to tylko dodatek do typografii/danych. Potem wybierz layout z listy, dopasowany do tresci, nastroju ORAZ do photoProminence: ${ARCHETYPE_KEYS.join(', ')}.` : ''}
 
 Odpowiedz TYLKO JSON bez markdown:
-{"coreIdea":"jednym zdaniem po polsku, o co naprawde chodzi w tym poscie","headline":"max 3 linie po polsku, konkretny obraz nie opis firmy","highlight":"fraza z headline do wyroznienia akcentem","visualMetaphor":"krotki opis po angielsku, jaki element graficzny/doodle ilustruje ta idee"${wantsPhoto ? `,"layout":"jeden z: ${ARCHETYPE_KEYS.join('|')}"` : ''}}`;
+{"coreIdea":"jednym zdaniem po polsku, o co naprawde chodzi w tym poscie","headline":"max 3 linie po polsku, konkretny obraz nie opis firmy","highlight":"fraza z headline do wyroznienia akcentem","visualMetaphor":"krotki opis po angielsku, jaki element graficzny/doodle ilustruje ta idee"${wantsPhoto ? `,"photoProminence":"hero|accent","layout":"jeden z: ${ARCHETYPE_KEYS.join('|')}"` : ''}}`;
 
     const briefReq = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
