@@ -222,7 +222,7 @@ Odpowiedz TYLKO JSON bez markdown:
 
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, removeBackground, generatePhotoAI } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -236,118 +236,65 @@ app.post('/api/design/generate-image', async (req, res) => {
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false;
-  const photoInstruction = !wantsPhoto
-    ? 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout'
-    : 'No photo, no person, no flubber blob rendered by you. Leave the right ~42% of the canvas completely blank flat background for its FULL HEIGHT, from just below the top logo/page-number row down to just above the bottom hashtag row - absolutely no headline, no body copy, no key phrase, no hashtag, no doodle, no logo may cross into that right-hand vertical strip. Keep ALL text elements strictly confined to the left ~55% column of the canvas. This right strip is reserved empty space for a photo to be composited on top afterward by another process.';
+
+  const brandBrief = `Design a vertical 4:5 social media post for 25wat, a Polish AI/marketing agency, matching EXACTLY the visual brand style shown in the attached reference images (flat design, no gradients, no drop shadows, bold geometric sans-serif type, organic flubber blob accents, hand-drawn doodle accents).
+
+Hard rules:
+- Solid flat background color: ${pair.bg} (${pair.bgName})
+- Headline text color: ${pair.text}. Highlight one key phrase in ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold, same color'}
+- One small hand-drawn doodle accent (underline, arrow or circles) near the key phrase
+- Leave a small blank rectangle in the top-left corner (roughly 220x70px) completely empty - no logo, no text, no shapes there, a real logo will be composited afterward by another process
+- Do not draw any page numbers or slide numbers anywhere
+- Polish text spelled EXACTLY as given below, correct diacritics
+${wantsPhoto && userPhoto ? '- A real photo of a person is attached as one of the input images - integrate them naturally into the composition exactly as photographed, keep their face and likeness completely unchanged and clearly recognizable, do not redraw, restyle or replace the person' : ''}
+${!wantsPhoto ? '- No photo, no person - pure typographic composition with generous whitespace' : ''}
+
+${customHeadline ? `Use exactly this headline text, do not change the wording, you may only choose which phrase to highlight: "${customHeadline}"` : `Post content to design (extract a short headline, max 8 words, and pick one key phrase to highlight):\n${post.title || ''}\n${post.content || ''}`}
+${photoDescription ? `Photo context: ${photoDescription}` : ''}`;
 
   try {
-    // 1. Claude pisze prompt wg brand booku
-    const promptReq = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 800,
-        system: `Piszesz prompty do generatora obrazów (gpt-image) dla agencji 25wat. Zwracasz WYŁĄCZNIE treść promptu po angielsku, nic więcej.
+    const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
+    let exampleFiles = [];
+    try {
+      const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
+      exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
+      if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
+    } catch(e) { exampleFiles = []; }
 
-Piszesz jak art director opisujacy GOTOWY, kompletny post - jeden plynny, obrazowy prompt, nie lista zakazow.
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    for (const f of exampleFiles) {
+      const buf = await sharp(fs.readFileSync(path.join(EXAMPLES_DIR, f))).resize(1024, 1536, { fit: 'inside' }).png().toBuffer();
+      form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+    }
+    if (userPhoto && wantsPhoto) {
+      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const rawBuf = Buffer.from(b64in, 'base64');
+      const buf = await sharp(rawBuf).png().toBuffer();
+      form.append('image[]', new Blob([buf], { type: 'image/png' }), 'user-photo.png');
+    }
+    form.append('prompt', brandBrief);
+    form.append('size', '1024x1536');
+    form.append('quality', 'high');
 
-TWARDE ZASADY BRANDU (wplec naturalnie):
-- Flat design, absolutely no gradients, no glow, no drop shadows on graphic elements
-- Background: solid flat ${pair.bg} (${pair.bgName})
-- Headline text color: ${pair.text}. Key phrase highlight: ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold only'} - NEVER neon lime text on beige
-- Modern geometric sans-serif (Gilroy-like), headline semibold, key phrase in accent color
-- ${photoInstruction}
-- One small hand-drawn doodle (underline, arrow or circles) near the key phrase
-- Polish text spelled EXACTLY as given, correct diacritics
-- Vertical 4:5 social media post, generous whitespace, editorial feel
+    const useEdits = exampleFiles.length > 0 || (userPhoto && wantsPhoto);
+    const imgReq = useEdits
+      ? await fetch('https://api.openai.com/v1/images/edits', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+          body: form
+        })
+      : await fetch('https://api.openai.com/v1/images/generations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+          body: JSON.stringify({ model: 'gpt-image-1', prompt: brandBrief, size: '1024x1536', quality: 'high', n: 1 })
+        });
 
-ELEMENTY META (jak w prawdziwym poscie agencji - uzyj tych, ktore sluza kompozycji):
-- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) completely blank flat background - absolutely no logo, no text, no shapes there, reserved for a real logo to be overlaid afterward by another process
-- Small uppercase hashtag bottom-left
-- Small circular accent-color CTA chip with arrow and short Polish label (e.g. "Przewin po wiecej")
-
-${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkownika (nie zmieniaj tresci, mozesz tylko wybrac fraze do wyroznienia akcentem): "${customHeadline}"` : 'Z treści posta wyciągnij krótki headline (max 10 słów) i frazę kluczową do wyróżnienia akcentem.'}`,
-        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (userPhoto ? '\n\nUWAGA: uzytkownik dostarczyl wlasne zdjecie - NIE opisuj osoby ani sceny na zdjeciu, napisz prompt zakladajacy ze zdjecie juz istnieje i ma byc wkomponowane w blob w niezmienionej formie (natural colors, no filter).' : photoDescription ? `\n\nOpis zdjecia od uzytkownika (uzyj go zamiast domyslnego opisu osoby w biurze): ${photoDescription}` : '') }]
-      })
-    });
-    const promptData = await promptReq.json();
-    const imagePrompt = promptData.content?.find(b => b.type === 'text')?.text;
-    if (!imagePrompt) throw new Error('Claude nie zwrócił promptu');
-
-    // 2. OpenAI generuje TYLKO tlo + typografie (zdjecie komponujemy lokalnie przez sharp)
-    const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: imagePrompt,
-        size: '1024x1536',
-        quality: 'high',
-        n: 1
-      })
-    });
     const imgData = await imgReq.json();
     if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
     let b64 = imgData.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
 
-    // 3. Zdobadz zdjecie: wgrane przez uzytkownika, albo wygenerowane przez AI, albo brak
-    let rawPhoto = null;
-    if (userPhoto) {
-      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      rawPhoto = Buffer.from(b64in, 'base64');
-    } else if (wantsPhoto && generatePhotoAI) {
-      const photoPrompt = `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${photoDescription || post.title || 'professional B2B content'}.`;
-      const photoReq = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-        body: JSON.stringify({ model: 'gpt-image-1', prompt: photoPrompt, n: 1, size: '1024x1536', quality: 'high' })
-      });
-      const photoData = await photoReq.json();
-      if (photoData.data?.[0]?.b64_json) {
-        rawPhoto = Buffer.from(photoData.data[0].b64_json, 'base64');
-      } else {
-        throw new Error('Nie udalo sie wygenerowac zdjecia AI: ' + (photoData.error?.message || 'brak obrazu'));
-      }
-    }
-
-    // 4. Wkomponuj zdjecie lokalnie - stala kolumna pelnej wysokosci po prawej, zero nakladania na tekst
-    if (rawPhoto && wantsPhoto) {
-      const CANVAS_W = 1024, CANVAS_H = 1536;
-      const COL_W = Math.round(CANVAS_W * 0.40);
-      const COL_MARGIN = 40;
-      const COL_LEFT = CANVAS_W - COL_W - COL_MARGIN;
-      const COL_TOP = 150;
-      const COL_H = CANVAS_H - COL_TOP - 110;
-
-      let photoLayer;
-      if (removeBackground) {
-        if (!REMOVE_BG_KEY) throw new Error('Brak REMOVE_BG_KEY na serwerze');
-        const cutoutBuf = await removeBg(rawPhoto);
-        const trimmed = await sharp(cutoutBuf).trim().toBuffer();
-        photoLayer = await sharp(trimmed)
-          .resize(COL_W, COL_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: 'bottom' })
-          .png()
-          .toBuffer();
-      } else {
-        const roundedMask = Buffer.from(`<svg width="${COL_W}" height="${COL_H}"><rect x="0" y="0" width="${COL_W}" height="${COL_H}" rx="28" ry="28" fill="#fff"/></svg>`);
-        const cropped = await sharp(rawPhoto).resize(COL_W, COL_H, { fit: 'cover' }).png().toBuffer();
-        photoLayer = await sharp(cropped)
-          .composite([{ input: roundedMask, blend: 'dest-in' }])
-          .png()
-          .toBuffer();
-      }
-
-      const bgBuf = Buffer.from(b64, 'base64');
-      const composited = await sharp(bgBuf)
-        .composite([{ input: photoLayer, top: COL_TOP, left: COL_LEFT }])
-        .png()
-        .toBuffer();
-      b64 = composited.toString('base64');
-    }
-
-    // Naloz prawdziwe logo SVG zamiast pozwalac GPT je rysowac (halucynacje na tekscie logo)
     const logoFile = pair.bgName === 'dark' ? 'primary-logo-25wat-light.svg' : 'primary-logo-25wat-dark.svg';
     const logoPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/logo', logoFile);
     const logoBuf = await sharp(fs.readFileSync(logoPath)).resize({ height: 44 }).png().toBuffer();
@@ -359,7 +306,7 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
 
     res.json({
       image: 'data:image/png;base64,' + b64,
-      prompt: imagePrompt,
+      prompt: brandBrief,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       logo: null
     });
