@@ -238,9 +238,7 @@ app.post('/api/design/generate-image', async (req, res) => {
   const wantsPhoto = hasPhoto !== false;
   const photoInstruction = !wantsPhoto
     ? 'No photo, no flubber blob - pure typographic composition: bold headline as the hero element, one or two hand-drawn doodle accents (underline, arrow or circles) in accent color, generous whitespace, editorial layout'
-    : removeBackground
-      ? 'No photo, no person, no flubber blob rendered by you. Leave the bottom-right region (roughly 67% of canvas width, 62% of canvas height - starting at about 32% from the left edge and 36% from the top edge, extending all the way to the bottom-right corner) as plain flat background - absolutely no headline, no body copy, no hashtag, no doodle, no logo inside that region, it is reserved empty space for a photo cutout to be composited on top afterward. Keep ALL text elements (headline, body copy, hashtag, CTA chip) strictly within the remaining left ~32% column of the canvas, or above the 36% height line.'
-      : 'No photo rendered by you. Leave the top-right region (roughly 55% of canvas width, 40% of canvas height, starting near the top edge) as plain flat background - no text, no logo, no doodle there - reserved empty space for a photo to be composited afterward by another process';
+    : 'No photo, no person, no flubber blob rendered by you. Leave the right ~42% of the canvas completely blank flat background for its FULL HEIGHT, from just below the top logo/page-number row down to just above the bottom hashtag row - absolutely no headline, no body copy, no key phrase, no hashtag, no doodle, no logo may cross into that right-hand vertical strip. Keep ALL text elements strictly confined to the left ~55% column of the canvas. This right strip is reserved empty space for a photo to be composited on top afterward by another process.';
 
   try {
     // 1. Claude pisze prompt wg brand booku
@@ -315,53 +313,38 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
       }
     }
 
-    // 4. Wkomponuj zdjecie lokalnie (flubber blob albo zwykly kadr dla pary 'dark')
+    // 4. Wkomponuj zdjecie lokalnie - stala kolumna pelnej wysokosci po prawej, zero nakladania na tekst
     if (rawPhoto && wantsPhoto) {
+      const CANVAS_W = 1024, CANVAS_H = 1536;
+      const COL_W = Math.round(CANVAS_W * 0.40);
+      const COL_MARGIN = 40;
+      const COL_LEFT = CANVAS_W - COL_W - COL_MARGIN;
+      const COL_TOP = 150;
+      const COL_H = CANVAS_H - COL_TOP - 110;
+
+      let photoLayer;
       if (removeBackground) {
         if (!REMOVE_BG_KEY) throw new Error('Brak REMOVE_BG_KEY na serwerze');
         const cutoutBuf = await removeBg(rawPhoto);
-        const CANVAS_W = 1024, CANVAS_H = 1536;
-        const PHOTO_H = 950, PHOTO_W = Math.round(PHOTO_H * 0.72);
-        const photoResized = await sharp(cutoutBuf)
-          .resize(PHOTO_W, PHOTO_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        photoLayer = await sharp(cutoutBuf)
+          .resize(COL_W, COL_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .png()
           .toBuffer();
-        const LEFT = CANVAS_W - PHOTO_W - 10;
-        const TOP = CANVAS_H - PHOTO_H - 30;
-        const bgBuf = Buffer.from(b64, 'base64');
-        const composited = await sharp(bgBuf)
-          .composite([{ input: photoResized, top: TOP, left: LEFT }])
-          .png()
-          .toBuffer();
-        b64 = composited.toString('base64');
       } else {
-        const CANVAS_W = 1024, REGION_W = 560, REGION_H = 600, MARGIN = 48;
-        const REGION_TOP = MARGIN, REGION_LEFT = CANVAS_W - REGION_W - MARGIN;
-
-        const photoResized = await sharp(rawPhoto)
-          .resize(REGION_W, REGION_H, { fit: 'cover' })
+        const roundedMask = Buffer.from(`<svg width="${COL_W}" height="${COL_H}"><rect x="0" y="0" width="${COL_W}" height="${COL_H}" rx="28" ry="28" fill="#fff"/></svg>`);
+        const cropped = await sharp(rawPhoto).resize(COL_W, COL_H, { fit: 'cover' }).png().toBuffer();
+        photoLayer = await sharp(cropped)
+          .composite([{ input: roundedMask, blend: 'dest-in' }])
           .png()
           .toBuffer();
-
-        let photoLayer = photoResized;
-        if (pair.accentName !== 'dark') {
-          const folder = pair.accentName === 'ultraviolet' ? 'ultraviolet' : 'neon';
-          const svgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/graphic/flubber', `flubber-${folder}-1.svg`);
-          let svgText = fs.readFileSync(svgPath, 'utf8').replace(/fill="#[A-Fa-f0-9]+"/, 'fill="#FFFFFF"');
-          const maskBuf = await sharp(Buffer.from(svgText)).resize(REGION_W, REGION_H).png().toBuffer();
-          photoLayer = await sharp(photoResized)
-            .composite([{ input: maskBuf, blend: 'dest-in' }])
-            .png()
-            .toBuffer();
-        }
-
-        const bgBuf = Buffer.from(b64, 'base64');
-        const composited = await sharp(bgBuf)
-          .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
-          .png()
-          .toBuffer();
-        b64 = composited.toString('base64');
       }
+
+      const bgBuf = Buffer.from(b64, 'base64');
+      const composited = await sharp(bgBuf)
+        .composite([{ input: photoLayer, top: COL_TOP, left: COL_LEFT }])
+        .png()
+        .toBuffer();
+      b64 = composited.toString('base64');
     }
 
     res.json({
