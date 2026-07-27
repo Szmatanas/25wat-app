@@ -235,7 +235,7 @@ app.post('/api/design/generate-image', async (req, res) => {
     { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
-  const wantsPhoto = hasPhoto !== false;
+  const wantsPhoto = hasPhoto !== false && !!userPhoto;
 
   const brandBrief = `Design a vertical 4:5 social media post for 25wat, a Polish AI/marketing agency, matching EXACTLY the visual brand style shown in the attached reference images (flat design, no gradients, no drop shadows, bold geometric sans-serif type, organic flubber blob accents, hand-drawn doodle accents).
 
@@ -243,67 +243,86 @@ Hard rules:
 - Solid flat background color: ${pair.bg} (${pair.bgName})
 - Headline text color: ${pair.text}. Highlight one key phrase in ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold, same color'}
 - One small hand-drawn doodle accent (underline, arrow or circles) near the key phrase
-- Leave a small blank rectangle in the top-left corner (roughly 220x70px) completely empty - no logo, no text, no shapes there, a real logo will be composited afterward by another process
+- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no boxes, no text, no logo there - reserved for a real logo to be overlaid afterward
 - Do not draw any page numbers or slide numbers anywhere
 - Polish text spelled EXACTLY as given below, correct diacritics
-${wantsPhoto && userPhoto ? '- A real photo of a person is attached as one of the input images - integrate them naturally into the composition exactly as photographed, keep their face and likeness completely unchanged and clearly recognizable, this is a real specific photograph - use the exact uploaded pixels of this person unchanged, do not generate a new or similar-looking face, do not redraw, restyle or replace the person' : ''}
+${wantsPhoto ? '- Bottom-right area (roughly 55% of canvas width, 45% of canvas height, anchored to bottom-right corner): leave as pure flat background color, absolutely no text, no shapes, no illustration there - this exact area is reserved for a real photograph to be pasted in afterward by another process, do not draw a person or placeholder there' : ''}
 ${!wantsPhoto ? '- No photo, no person - pure typographic composition with generous whitespace' : ''}
 
 ${customHeadline ? `Use exactly this headline text, do not change the wording, you may only choose which phrase to highlight: "${customHeadline}"` : `Post content to design (extract a short headline, max 8 words, and pick one key phrase to highlight):\n${post.title || ''}\n${post.content || ''}`}
-${photoDescription ? `Photo context: ${photoDescription}` : ''}`;
+${photoDescription ? `Context: ${photoDescription}` : ''}`;
 
   try {
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
     let exampleFiles = [];
-    // Gdy user dal wlasne zdjecie - NIE wysylamy referencji brandowych, zeby GPT
-    // nie mieszal twarzy usera z innymi obrazami. Zdjecie usera ma byc jedyna baza edycji.
-    if (!(userPhoto && wantsPhoto)) {
-      try {
-        const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
-        exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
-        if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
-      } catch(e) { exampleFiles = []; }
-    }
+    try {
+      const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
+      exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
+      if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
+    } catch(e) { exampleFiles = []; }
 
-    const form = new FormData();
-    form.append('model', 'gpt-image-1');
-    for (const f of exampleFiles) {
-      const buf = await sharp(fs.readFileSync(path.join(EXAMPLES_DIR, f))).resize(1024, 1536, { fit: 'inside' }).png().toBuffer();
-      form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+    let b64;
+    if (exampleFiles.length > 0) {
+      const form = new FormData();
+      form.append('model', 'gpt-image-1');
+      for (const f of exampleFiles) {
+        const buf = await sharp(fs.readFileSync(path.join(EXAMPLES_DIR, f))).resize(1024, 1536, { fit: 'inside' }).png().toBuffer();
+        form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+      }
+      form.append('prompt', brandBrief);
+      form.append('size', '1024x1536');
+      form.append('quality', 'high');
+      const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: form
+      });
+      const imgData = await imgReq.json();
+      if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
+      b64 = imgData.data?.[0]?.b64_json;
+    } else {
+      const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({ model: 'gpt-image-1', prompt: brandBrief, size: '1024x1536', quality: 'high', n: 1 })
+      });
+      const imgData = await imgReq.json();
+      if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
+      b64 = imgData.data?.[0]?.b64_json;
     }
-    if (userPhoto && wantsPhoto) {
-      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const rawBuf = Buffer.from(b64in, 'base64');
-      const buf = await sharp(rawBuf).png().toBuffer();
-      form.append('image[]', new Blob([buf], { type: 'image/png' }), 'user-photo.png');
-    }
-    form.append('prompt', brandBrief);
-    form.append('size', '1024x1536');
-    form.append('quality', 'high');
-
-    const useEdits = exampleFiles.length > 0 || (userPhoto && wantsPhoto);
-    const imgReq = useEdits
-      ? await fetch('https://api.openai.com/v1/images/edits', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-          body: form
-        })
-      : await fetch('https://api.openai.com/v1/images/generations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-          body: JSON.stringify({ model: 'gpt-image-1', prompt: brandBrief, size: '1024x1536', quality: 'high', n: 1 })
-        });
-
-    const imgData = await imgReq.json();
-    if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
-    let b64 = imgData.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
 
+    // Wklej prawdziwe zdjecie usera lokalnie (deterministycznie, bez udzialu AI - gwarancja tej samej twarzy)
+    if (wantsPhoto) {
+      const CANVAS_W = 1024, CANVAS_H = 1536;
+      const REGION_W = Math.round(CANVAS_W * 0.55), REGION_H = Math.round(CANVAS_H * 0.45);
+      const REGION_LEFT = CANVAS_W - REGION_W, REGION_TOP = CANVAS_H - REGION_H;
+
+      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const rawPhoto = Buffer.from(b64in, 'base64');
+      const photoResized = await sharp(rawPhoto)
+        .resize(REGION_W, REGION_H, { fit: 'cover' })
+        .png()
+        .toBuffer();
+
+      const bgBuf = Buffer.from(b64, 'base64');
+      const composited = await sharp(bgBuf)
+        .composite([{ input: photoResized, top: REGION_TOP, left: REGION_LEFT }])
+        .png()
+        .toBuffer();
+      b64 = composited.toString('base64');
+    }
+
+    // Nadpisz obszar logo wlasnym tlem w kolorze brandu (na wypadek gdyby GPT cos tam narysowal), potem realne logo SVG
+    const bgColorBuf = await sharp({ create: { width: 220, height: 70, channels: 4, background: pair.bg } }).png().toBuffer();
     const logoFile = pair.bgName === 'dark' ? 'primary-logo-25wat-light.svg' : 'primary-logo-25wat-dark.svg';
     const logoPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/logo', logoFile);
     const logoBuf = await sharp(fs.readFileSync(logoPath)).resize({ height: 44 }).png().toBuffer();
     const withLogo = await sharp(Buffer.from(b64, 'base64'))
-      .composite([{ input: logoBuf, top: 60, left: 60 }])
+      .composite([
+        { input: bgColorBuf, top: 60, left: 60 },
+        { input: logoBuf, top: 60, left: 60 }
+      ])
       .png()
       .toBuffer();
     b64 = withLogo.toString('base64');
