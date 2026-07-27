@@ -16,7 +16,7 @@ app.use(express.json({ limit: '15mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
-const REMOVE_BG_KEY = process.env.REMOVE_BG_KEY || '';
+const REMOVE_BG_KEY = process.env.REMOVEBG_API_KEY || '';
 const COMPETITORS = [
   { name: 'Sellwise', query: 'Sellwise Szymon Negacz social media content 2026' },
   { name: 'Automation House', query: 'Automation House agencja AI Polska content 2026' },
