@@ -246,7 +246,7 @@ Hard rules:
 - Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no boxes, no text, no logo there - reserved for a real logo to be overlaid afterward
 - Do not draw any page numbers or slide numbers anywhere
 - Polish text spelled EXACTLY as given below, correct diacritics
-${wantsPhoto ? '- Bottom-right area (roughly 55% of canvas width, 45% of canvas height, anchored to bottom-right corner): leave as pure flat background color, absolutely no text, no shapes, no illustration there - this exact area is reserved for a real photograph to be pasted in afterward by another process, do not draw a person or placeholder there' : ''}
+${wantsPhoto ? '- CRITICAL LAYOUT CONSTRAINT: all headline text, all doodles and all other content must fit ENTIRELY within the TOP 55% of the canvas height. The bottom 45% of the canvas, across its full width, must remain completely empty flat background color - absolutely no text, no letters, no doodles, no shapes may extend into this bottom band even partially. This bottom band is reserved for a real photograph to be pasted in afterward by another process. Treat this bottom band exactly like the edge of the canvas - nothing is allowed to cross into it.' : ''}
 ${!wantsPhoto ? '- No photo, no person - pure typographic composition with generous whitespace' : ''}
 
 ${customHeadline ? `Use exactly this headline text, do not change the wording, you may only choose which phrase to highlight: "${customHeadline}"` : `Post content to design (extract a short headline, max 8 words, and pick one key phrase to highlight):\n${post.title || ''}\n${post.content || ''}`}
@@ -292,22 +292,39 @@ ${photoDescription ? `Context: ${photoDescription}` : ''}`;
     }
     if (!b64) throw new Error('OpenAI nie zwrócił obrazu');
 
-    // Wklej prawdziwe zdjecie usera lokalnie (deterministycznie, bez udzialu AI - gwarancja tej samej twarzy)
+    // Wklej prawdziwe zdjecie usera lokalnie jako sylwetke (remove.bg) zamiast twardego prostokata
     if (wantsPhoto) {
       const CANVAS_W = 1024, CANVAS_H = 1536;
-      const REGION_W = Math.round(CANVAS_W * 0.55), REGION_H = Math.round(CANVAS_H * 0.45);
-      const REGION_LEFT = CANVAS_W - REGION_W, REGION_TOP = CANVAS_H - REGION_H;
+      const BAND_TOP = Math.round(CANVAS_H * 0.55);
+      const BAND_H = CANVAS_H - BAND_TOP;
+      const MARGIN_R = 40, MARGIN_B = 40;
+      const REGION_W = Math.round(CANVAS_W * 0.62);
+      const REGION_H = BAND_H - MARGIN_B;
 
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
       const rawPhoto = Buffer.from(b64in, 'base64');
-      const photoResized = await sharp(rawPhoto)
-        .resize(REGION_W, REGION_H, { fit: 'cover' })
-        .png()
-        .toBuffer();
 
+      let photoLayer;
+      try {
+        const cutoutBuf = await removeBg(rawPhoto);
+        const trimmed = await sharp(cutoutBuf).trim().toBuffer();
+        photoLayer = await sharp(trimmed)
+          .resize(REGION_W, REGION_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: 'bottom' })
+          .png()
+          .toBuffer();
+      } catch(e) {
+        console.error('removeBg fallback:', e.message);
+        photoLayer = await sharp(rawPhoto)
+          .resize(REGION_W, REGION_H, { fit: 'cover' })
+          .png()
+          .toBuffer();
+      }
+
+      const REGION_LEFT = CANVAS_W - REGION_W - MARGIN_R;
+      const REGION_TOP = CANVAS_H - REGION_H - MARGIN_B;
       const bgBuf = Buffer.from(b64, 'base64');
       const composited = await sharp(bgBuf)
-        .composite([{ input: photoResized, top: REGION_TOP, left: REGION_LEFT }])
+        .composite([{ input: photoLayer, top: REGION_TOP, left: REGION_LEFT }])
         .png()
         .toBuffer();
       b64 = composited.toString('base64');
