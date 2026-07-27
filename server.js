@@ -326,8 +326,9 @@ ${customHeadline ? `UWAGA: uzyj DOKLADNIE tego headline podanego przez uzytkowni
       if (removeBackground) {
         if (!REMOVE_BG_KEY) throw new Error('Brak REMOVE_BG_KEY na serwerze');
         const cutoutBuf = await removeBg(rawPhoto);
-        photoLayer = await sharp(cutoutBuf)
-          .resize(COL_W, COL_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        const trimmed = await sharp(cutoutBuf).trim().toBuffer();
+        photoLayer = await sharp(trimmed)
+          .resize(COL_W, COL_H, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: 'bottom' })
           .png()
           .toBuffer();
       } else {
