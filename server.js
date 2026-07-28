@@ -249,7 +249,7 @@ const PHOTO_ARCHETYPES = {
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -316,6 +316,7 @@ Hard rules:
 - CRITICAL: any illustration, doodle, icon or decorative shape must NEVER touch, overlap, or visually cross the headline text or the highlighted phrase. Keep at least a clear gap between text and any decorative element, even outside the reserved photo zone.
 - CRITICAL: the reserved photo zone described below must stay completely empty flat background color - no illustration, doodle, prop, sign, or any part of a decorative shape may extend, hang, or bleed into it, even partially. Treat its boundary exactly like the edge of the canvas.
 ${integratedPhoto ? '- The LAST attached reference image is a real photo of the person featured in this post. Preserve their face and identity with very high fidelity, exactly as shown - do not alter, stylize, or redraw their face or appearance. Design the entire composition (colors, flubber blob shape, doodle accents, layout, headline placement) around this exact photo as the hero of the piece, the way a magazine editorial integrates a real portrait into a designed page.' : (wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements')}
+${styleNote ? '- IMPORTANT client feedback on style, follow it closely: ' + styleNote : ''}
 - Polish text spelled EXACTLY as given, correct diacritics`;
 
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
@@ -426,6 +427,30 @@ ${integratedPhoto ? '- The LAST attached reference image is a real photo of the 
 });
 
 const PORT = process.env.PORT || 3001;
+app.post('/api/design/account-action', async (req, res) => {
+  const { message, post, colorPairIdx, hasPhoto } = req.body;
+  const sys = `Jestes Account Managerem w agencji 25wat. Klient napisal chaotyczna, potocznie sformulowana uwage o designie posta, ktory wlasnie zostal wygenerowany. Twoim zadaniem jest zdecydowac JAKA AKCJE wykonac - nie realizuj jej samemu, tylko sklasyfikuj.
+
+Dostepne akcje:
+- "change_color": klient chce innej kolorystyki / palety / tla
+- "restyle": klient chce zmiany stylu grafiki (np. mniej ilustracji, bardziej flat/minimalistyczne, inny nastroj, inna kompozycja, cos "dziwne")
+- "change_photo": klient chce innego zdjecia albo inaczej pokazanej osoby
+- "edit_copy": klient chce zmienic tekst posta, nie sam design
+- "clarify": NIE jest jasne o co konkretnie chodzi (np. "zmien kolory" bez wskazania na jakie, "zmien zdjecie" bez wskazania czy nowe AI czy wgrac wlasne) - zadaj JEDNO precyzyjne pytanie dopytujace, NIE zgaduj
+
+Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? colorPairIdx : 'nieznana'} (0-4), post ${hasPhoto ? 'ZE zdjeciem' : 'BEZ zdjecia'}.
+
+Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color (inna niz aktualna), w innym przypadku null"}`;
+
+  try {
+    const context = `Post: ${post?.title || ''}\nTresc: ${post?.content || ''}\n\nUwaga klienta: ${message}`;
+    const decision = await claude(sys, context);
+    res.json(decision);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
 const BRAND_VOICE = `Jesteś copywriterem agencji 25wat (AI Driven Agency, Wrocław). Piszesz posty na Facebook po polsku.
