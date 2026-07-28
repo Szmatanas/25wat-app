@@ -440,7 +440,7 @@ Dostepne akcje:
 
 Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? colorPairIdx : 'nieznana'} (0-4), post ${hasPhoto ? 'ZE zdjeciem' : 'BEZ zdjecia'}.
 
-Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color (inna niz aktualna), w innym przypadku null"}`;
+Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","topic":"color|photo|style|copy|other - czego NAJBARDZIEJ dotyczy uwaga klienta, wypelnij zawsze niezaleznie od action","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color (inna niz aktualna), w innym przypadku null"}`;
 
   try {
     const context = `Post: ${post?.title || ''}\nTresc: ${post?.content || ''}\n\nUwaga klienta: ${message}`;
