@@ -81,7 +81,10 @@ app.post('/api/research/auto', async (req, res) => {
 
 app.post('/api/design/generate-photo', async (req, res) => {
   const { postTitle } = req.body;
-  const prompt = `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Context: ${postTitle || 'professional B2B content'}.`;
+  const hasDescription = !!(postTitle && postTitle.trim().length > 0);
+  const prompt = hasDescription
+    ? `Candid editorial portrait, photorealistic, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the person's appearance, clothing, setting and activity, do not default to generic office attire unless the description itself calls for it: ${postTitle}.`
+    : `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio.`;
   try {
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
