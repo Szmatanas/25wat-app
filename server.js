@@ -255,168 +255,75 @@ app.post('/api/design/generate-image', async (req, res) => {
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
 
   const pairs = [
-    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#D0F200', accentName: 'neon lime' },
     { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#D0F200', accentName: 'neon lime' },
     { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#D0F200', accentName: 'neon lime' },
     { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#7648F8', accentName: 'ultraviolet' },
     { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
-  const integratedPhoto = wantsPhoto && !!req.body.integratedPhoto;
+
+  const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
+  const LIGHT_REFS = ['light-post-4_5-example-8.png', 'light-post-square-example-5.png', 'light-post-square-example-6.png', 'light-post-square-example-7.png'];
+  const references = pair.bgName === 'dark' ? DARK_REFS : LIGHT_REFS;
 
   try {
-    // 1. Claude tworzy creative brief - jeden ostry pomysl, nie opis firmy
-    const briefSys = `Jestes Creative Directorem w agencji 25wat. Twoim zadaniem NIE jest podsumowac posta - masz wymyslic JEDEN mocny, konkretny insight wizualny, ktory da sie zaprojektowac.
-
-Zly headline: "Jestesmy agencja kreatywna dla firm, ktore chca rosnac szybciej" (opis firmy, nic do zaprojektowania).
-Dobry headline: "Procesy nie jadaja na urlop." (konkretny obraz, kontrast, cos do zilustrowania).
-
-Zasady headline:
-- max 3 linie, kazda linia krotka (2-5 slow)
-- konkret / kontrast / obraz - nie ogolnik o marce czy branzy
-- jedna fraza do wyroznienia kolorem akcentu
-
-${wantsPhoto ? `Zdecyduj najpierw photoProminence: "hero" jesli osoba/jej historia jest centralna dla posta (zdjecie ma wtedy zajmowac duzy obszar kompozycji), "accent" jesli zdjecie to tylko dodatek do typografii/danych. Potem wybierz layout z listy, dopasowany do tresci, nastroju ORAZ do photoProminence: ${ARCHETYPE_KEYS.join(', ')}.` : ''}
-
-Odpowiedz TYLKO JSON bez markdown:
-{"coreIdea":"jednym zdaniem po polsku, o co naprawde chodzi w tym poscie","headline":"max 3 linie po polsku, konkretny obraz nie opis firmy","highlight":"fraza z headline do wyroznienia akcentem","visualMetaphor":"krotki opis po angielsku, jaki element graficzny/doodle ilustruje ta idee"${wantsPhoto ? `,"photoProminence":"hero|accent","layout":"jeden z: ${ARCHETYPE_KEYS.join('|')}"` : ''}}`;
-
-    const briefReq = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        system: briefSys,
-        messages: [{ role: 'user', content: `Post (typ: ${post.type || 'edukacyjny'}): ${post.title || ''}\n${post.content || ''}` + (customHeadline ? `\n\nUZYJ DOKLADNIE tego headline, nie zmieniaj tresci: "${customHeadline}"` : '') + (photoDescription ? `\n\nKontekst zdjecia: ${photoDescription}` : '') }]
-      })
-    });
-    const briefData = await briefReq.json();
-    const briefRaw = briefData.content?.find(b => b.type === 'text')?.text || '{}';
-    const brief = safeJSON(briefRaw);
-    if (!brief.headline) throw new Error('Claude nie zwrocil brief-u');
-
-    const archetypeKey = wantsPhoto && PHOTO_ARCHETYPES[brief.layout] ? brief.layout : ARCHETYPE_KEYS[0];
-    const archetype = PHOTO_ARCHETYPES[archetypeKey];
-
-    // 2. Zbuduj finalny prompt do GPT Image na bazie brief-u (opisowy, jak art director, nie lista zakazow)
-    const brandBrief = `Design a vertical 4:5 social media post for 25wat, a Polish AI/marketing agency, matching EXACTLY the visual brand style shown in the attached reference images (flat design, no gradients, no drop shadows, bold geometric sans-serif type, organic flubber blob accents, hand-drawn doodle accents).
-
-Core idea to illustrate: ${brief.coreIdea}
-Visual metaphor / accent: ${brief.visualMetaphor || 'a simple hand-drawn doodle near the key phrase'}
-
-Hard rules:
-- Solid flat background color: ${pair.bg} (${pair.bgName})
-- Headline (exact text, do not change wording, keep the line breaks as natural short lines): "${brief.headline}"
-- Highlight this exact phrase in ${pair.bgName === 'beige' ? '#7648F8 (ultraviolet)' : pair.bgName === 'dark' ? '#D0F200 (neon lime)' : pair.text + ' semibold, same color'}: "${brief.highlight || ''}"
-- Headline text color otherwise: ${pair.text}
-- Top-left corner: leave a small rectangular area (roughly 220px wide, 70px tall, starting right at the top-left edge) as pure flat background color, absolutely no shapes, no text, no logo there - reserved for a real logo to be overlaid afterward
-- Do not draw any page numbers or slide numbers anywhere
-- CRITICAL: any illustration, doodle, icon or decorative shape must NEVER touch, overlap, or visually cross the headline text or the highlighted phrase. Keep at least a clear gap between text and any decorative element, even outside the reserved photo zone.
-- CRITICAL: the reserved photo zone described below must stay completely empty flat background color - no illustration, doodle, prop, sign, or any part of a decorative shape may extend, hang, or bleed into it, even partially. Treat its boundary exactly like the edge of the canvas.
-${integratedPhoto ? '- The LAST attached reference image is a real photo of the person featured in this post. Preserve their face and identity with very high fidelity, exactly as shown - do not alter, stylize, or redraw their face or appearance. Design the entire composition (colors, flubber blob shape, doodle accents, layout, headline placement) around this exact photo as the hero of the piece, the way a magazine editorial integrates a real portrait into a designed page.' : (wantsPhoto ? archetype.prompt : '- No photo, no person - pure typographic composition with generous whitespace, the headline and visual metaphor doodle are the hero elements')}
-${styleNote ? '- IMPORTANT client feedback on style, follow it closely: ' + styleNote : ''}
-- Polish text spelled EXACTLY as given, correct diacritics`;
-
+    const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/schemat/schemat.md');
+    const schemaText = fs.readFileSync(schemaPath, 'utf8');
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
-    let exampleFiles = [];
-    try {
-      const all = fs.readdirSync(EXAMPLES_DIR).filter(f => /\.(png|jpe?g)$/i.test(f));
-      exampleFiles = all.filter(f => /4_5/i.test(f)).slice(0, 3);
-      if (exampleFiles.length === 0) exampleFiles = all.slice(0, 3);
-    } catch(e) { exampleFiles = []; }
 
-    let b64;
-    if (exampleFiles.length > 0) {
-      const form = new FormData();
-      form.append('model', 'gpt-image-1');
-      const filesToSend = integratedPhoto ? exampleFiles.slice(0, 1) : exampleFiles;
-      for (const f of filesToSend) {
-        const buf = await sharp(fs.readFileSync(path.join(EXAMPLES_DIR, f))).resize(1024, 1536, { fit: 'inside' }).png().toBuffer();
-        form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
-      }
-      if (integratedPhoto) {
-        const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-        const rawPhoto = Buffer.from(b64in, 'base64');
-        const resizedPhoto = await sharp(rawPhoto).resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
-        form.append('image[]', new Blob([resizedPhoto], { type: 'image/jpeg' }), 'real_photo.jpg');
-      }
-      form.append('prompt', brandBrief);
-      form.append('size', '1024x1536');
-      form.append('quality', 'high');
-      form.append('input_fidelity', 'high');
-      const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-        body: form
-      });
-      const imgData = await imgReq.json();
-      if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
-      b64 = imgData.data?.[0]?.b64_json;
-    } else {
-      const imgReq = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-        body: JSON.stringify({ model: 'gpt-image-1', prompt: brandBrief, size: '1024x1536', quality: 'high', n: 1 })
-      });
-      const imgData = await imgReq.json();
-      if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
-      b64 = imgData.data?.[0]?.b64_json;
+    const postText = `Tytul: ${post.title || ''}\n${post.content || ''}`;
+
+    const colorInstruction = `UZYJ DOKLADNIE tej pary kolorow, nie wybieraj innej z tabeli w schemacie: tlo ${pair.bg} (${pair.bgName}), tekst ${pair.text}, akcent ${pair.accent} (${pair.accentName}).`;
+
+    const headlineInstruction = customHeadline
+      ? `Uzyj DOKLADNIE tego headline, nie zmieniaj tresci: "${customHeadline}"`
+      : `Wyciagnij z posta krotki, konkretny headline (max 3 linie) - dokladnie o tym, o czym jest ten post, nie ogolnik o firmie.`;
+
+    const photoInstruction = wantsPhoto ? `The LAST attached image is the real photo of the person featured in this post. This photo has higher priority than every other reference image attached below.
+
+Treat this image as the primary visual anchor. Preserve the person's identity with the highest possible fidelity.
+
+Do not change: facial structure, eyes, nose, mouth, hairstyle, facial hair, skin tone, age, expression, clothing, body proportions, pose, camera angle.
+
+Do not reinterpret, beautify, stylize, redraw or replace the person. Do not generate a similar person. Use the supplied person exactly as the reference.
+
+The person must be indistinguishable from the supplied photograph.
+
+Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjecia i bez osoby.';
+
+    const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
+
+    const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
+
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    for (const f of references) {
+      const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
+      form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
     }
-    if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
-
-    // 3. Wklej prawdziwe zdjecie usera lokalnie jako sylwetke (pomijamy gdy GPT juz narysowal prawdziwe zdjecie - integratedPhoto)
-    if (wantsPhoto && !integratedPhoto) {
-      const CANVAS_W = 1024, CANVAS_H = 1536;
-      const region = archetype.region(CANVAS_W, CANVAS_H);
-
+    if (wantsPhoto) {
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const rawPhoto = Buffer.from(b64in, 'base64');
-
-      let photoLayer;
-      try {
-        const cutoutBuf = await removeBg(rawPhoto);
-        const trimmed = await sharp(cutoutBuf).trim().toBuffer();
-        photoLayer = await sharp(trimmed)
-          .resize(region.w, region.h, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 }, position: archetype.position })
-          .png()
-          .toBuffer();
-      } catch(e) {
-        console.error('removeBg fallback:', e.message);
-        photoLayer = await sharp(rawPhoto)
-          .resize(region.w, region.h, { fit: 'cover' })
-          .png()
-          .toBuffer();
-      }
-
-      const bgBuf = Buffer.from(b64, 'base64');
-      const composited = await sharp(bgBuf)
-        .composite([{ input: photoLayer, top: region.top, left: region.left }])
-        .png()
-        .toBuffer();
-      b64 = composited.toString('base64');
+      const photoBuf = Buffer.from(b64in, 'base64');
+      form.append('image[]', new Blob([photoBuf], { type: 'image/jpeg' }), 'real_photo.jpg');
     }
+    form.append('prompt', prompt);
 
-    // 4. Nadpisz obszar logo wlasnym tlem w kolorze brandu, potem realne logo SVG
-    const bgColorBuf = await sharp({ create: { width: 220, height: 70, channels: 4, background: pair.bg } }).png().toBuffer();
-    const logoFile = pair.bgName === 'dark' ? 'primary-logo-25wat-light.svg' : 'primary-logo-25wat-dark.svg';
-    const logoPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/logo', logoFile);
-    const logoBuf = await sharp(fs.readFileSync(logoPath)).resize({ height: 44 }).png().toBuffer();
-    const withLogo = await sharp(Buffer.from(b64, 'base64'))
-      .composite([
-        { input: bgColorBuf, top: 60, left: 60 },
-        { input: logoBuf, top: 60, left: 60 }
-      ])
-      .png()
-      .toBuffer();
-    b64 = withLogo.toString('base64');
+    const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: form
+    });
+    const imgData = await imgReq.json();
+    if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
+    const b64 = imgData.data?.[0]?.b64_json;
+    if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
 
     res.json({
       image: 'data:image/png;base64,' + b64,
-      prompt: brandBrief,
-      brief,
-      layout: integratedPhoto ? 'integrated-photo' : (wantsPhoto ? archetypeKey : null),
+      prompt,
+      referencesUsed: references,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       logo: null
     });
@@ -426,7 +333,6 @@ ${styleNote ? '- IMPORTANT client feedback on style, follow it closely: ' + styl
   }
 });
 
-const PORT = process.env.PORT || 3001;
 app.post('/api/design/account-action', async (req, res) => {
   const { message, post, colorPairIdx, hasPhoto, history } = req.body;
   const sys = `Jestes Account Managerem w agencji 25wat. Klient napisal chaotyczna, potocznie sformulowana uwage o designie posta, ktory wlasnie zostal wygenerowany. Twoim zadaniem jest zdecydowac JAKA AKCJE wykonac - nie realizuj jej samemu, tylko sklasyfikuj.
