@@ -249,7 +249,7 @@ const PHOTO_ARCHETYPES = {
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote, format } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -263,6 +263,9 @@ app.post('/api/design/generate-image', async (req, res) => {
   ];
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
+
+  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536' };
+  const size = SIZE_MAP[format] || '1024x1536';
 
   const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
   const LIGHT_REFS = ['light-post-4_5-example-8.png', 'light-post-square-example-5.png', 'light-post-square-example-6.png', 'light-post-square-example-7.png'];
@@ -299,6 +302,7 @@ Build the entire composition around this photo. Modify only the surrounding grap
 
     const form = new FormData();
     form.append('model', 'gpt-image-1');
+    form.append('size', size);
     for (const f of references) {
       const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
       form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
@@ -325,6 +329,8 @@ Build the entire composition around this photo. Modify only the surrounding grap
       prompt,
       referencesUsed: references,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
+      format: format || 'post-4-5',
+      size,
       logo: null
     });
   } catch(e) {
