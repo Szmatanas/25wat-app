@@ -338,7 +338,8 @@ ${integratedPhoto ? '- The LAST attached reference image is a real photo of the 
       if (integratedPhoto) {
         const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
         const rawPhoto = Buffer.from(b64in, 'base64');
-        form.append('image[]', new Blob([rawPhoto], { type: 'image/jpeg' }), 'real_photo.jpg');
+        const resizedPhoto = await sharp(rawPhoto).resize(1536, 1536, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
+        form.append('image[]', new Blob([resizedPhoto], { type: 'image/jpeg' }), 'real_photo.jpg');
       }
       form.append('prompt', brandBrief);
       form.append('size', '1024x1536');
