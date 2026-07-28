@@ -420,6 +420,7 @@ app.post('/api/design/generate-image-raw', async (req, res) => {
   }
 });
 
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
 const BRAND_VOICE = `Jesteś copywriterem agencji 25wat (AI Driven Agency, Wrocław). Piszesz posty na Facebook po polsku.
