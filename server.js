@@ -428,7 +428,7 @@ ${styleNote ? '- IMPORTANT client feedback on style, follow it closely: ' + styl
 
 const PORT = process.env.PORT || 3001;
 app.post('/api/design/account-action', async (req, res) => {
-  const { message, post, colorPairIdx, hasPhoto } = req.body;
+  const { message, post, colorPairIdx, hasPhoto, history } = req.body;
   const sys = `Jestes Account Managerem w agencji 25wat. Klient napisal chaotyczna, potocznie sformulowana uwage o designie posta, ktory wlasnie zostal wygenerowany. Twoim zadaniem jest zdecydowac JAKA AKCJE wykonac - nie realizuj jej samemu, tylko sklasyfikuj.
 
 Dostepne akcje:
@@ -436,14 +436,26 @@ Dostepne akcje:
 - "restyle": klient chce zmiany stylu grafiki (np. mniej ilustracji, bardziej flat/minimalistyczne, inny nastroj, inna kompozycja, cos "dziwne")
 - "change_photo": klient chce innego zdjecia albo inaczej pokazanej osoby
 - "edit_copy": klient chce zmienic tekst posta, nie sam design
-- "clarify": NIE jest jasne o co konkretnie chodzi (np. "zmien kolory" bez wskazania na jakie, "zmien zdjecie" bez wskazania czy nowe AI czy wgrac wlasne) - zadaj JEDNO precyzyjne pytanie dopytujace, NIE zgaduj
+- "clarify": NIE jest jasne o co konkretnie chodzi - zadaj JEDNO precyzyjne pytanie dopytujace, NIE zgaduj
+
+Dostepne pary kolorow (indeks: tlo / tekst / akcent) - UZYWAJ TYCH FAKTYCZNYCH KOLOROW zeby wybrac targetColorPairIdx, nie zgaduj numeru:
+0: tlo ciemne #171717, tekst jasny #F2EDE3, akcent ultraviolet #7648F8
+1: tlo ciemne #171717, tekst jasny #F2EDE3, akcent neon lime #D0F200
+2: tlo jasne/bezowe #F2EDE3, tekst ciemny #171717, akcent neon lime #D0F200
+3: tlo jasne/bezowe #F2EDE3, tekst ciemny #171717, akcent ultraviolet #7648F8
+4: tlo neonowe #D0F200, tekst ciemny #171717, bez osobnego akcentu
 
 Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? colorPairIdx : 'nieznana'} (0-4), post ${hasPhoto ? 'ZE zdjeciem' : 'BEZ zdjecia'}.
 
-Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","topic":"color|photo|style|copy|other - czego NAJBARDZIEJ dotyczy uwaga klienta, wypelnij zawsze niezaleznie od action","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color (inna niz aktualna), w innym przypadku null"}`;
+KRYTYCZNA ZASADA: jesli ponizej w historii rozmowy widac, ze juz wczesniej zadales pytanie typu clarify na ten sam temat i klient odpowiedzial (nawet ogolnikowo, nawet "po prostu wykonaj") - NIE WOLNO Ci zwrocic clarify drugi raz z rzedu na ten sam temat. Zamiast tego podejmij najlepsza mozliwa decyzje na podstawie calej rozmowy i wykonaj akcje. Maksymalnie JEDNO dopytanie na dany temat, potem dzialaj.
+
+Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","topic":"color|photo|style|copy|other - czego NAJBARDZIEJ dotyczy uwaga klienta, wypelnij zawsze niezaleznie od action","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color dopasowana do FAKTYCZNYCH kolorow opisanych powyzej, w innym przypadku null"}`;
 
   try {
-    const context = `Post: ${post?.title || ''}\nTresc: ${post?.content || ''}\n\nUwaga klienta: ${message}`;
+    const historyText = Array.isArray(history) && history.length
+      ? '\n\nHistoria tej rozmowy o designie (od najstarszej):\n' + history.map(h => (h.role === 'user' ? 'Klient: ' : 'Account: ') + h.text).join('\n')
+      : '';
+    const context = `Post: ${post?.title || ''}\nTresc: ${post?.content || ''}${historyText}\n\nOstatnia uwaga klienta: ${message}`;
     const decision = await claude(sys, context);
     res.json(decision);
   } catch(e) {
