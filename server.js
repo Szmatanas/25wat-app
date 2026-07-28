@@ -463,6 +463,57 @@ Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|cla
   }
 });
 
+app.post('/api/design/generate-image-raw', async (req, res) => {
+  const { post, userPhoto } = req.body;
+  if (!post) return res.status(400).json({ error: 'Brak posta' });
+  if (!userPhoto) return res.status(400).json({ error: 'Brak zdjecia (userPhoto)' });
+  const OPENAI_KEY = process.env.OPENAI_KEY;
+  if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
+
+  try {
+    const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/schemat/schemat.md');
+    const schemaText = fs.readFileSync(schemaPath, 'utf8');
+
+    const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
+    const FIXED_REFERENCES = [
+      'light-post-4_5-example-8.png',
+      'light-post-square-example-7.png',
+      'dark-post-square-example-2.png',
+      'light-post-square-example-5.png',
+      'dark-post-4_5-example-4.png'
+    ];
+
+    const postText = `Tytul: ${post.title || ''}\n${post.content || ''}`;
+    const prompt = `${schemaText}\n\n---\n\nTo jest treosc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem i referencjami. Zachowaj zdjecie.`;
+
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    for (const f of FIXED_REFERENCES) {
+      const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
+      form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+    }
+    const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+    const photoBuf = Buffer.from(b64in, 'base64');
+    form.append('image[]', new Blob([photoBuf], { type: 'image/jpeg' }), 'real_photo.jpg');
+    form.append('prompt', prompt);
+
+    const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: form
+    });
+    const imgData = await imgReq.json();
+    if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
+    const b64 = imgData.data?.[0]?.b64_json;
+    if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
+
+    res.json({ image: 'data:image/png;base64,' + b64, prompt, referencesUsed: FIXED_REFERENCES });
+  } catch(e) {
+    console.error('generate-image-raw:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => console.log('25wat API running on :' + PORT));
 
 const BRAND_VOICE = `Jesteś copywriterem agencji 25wat (AI Driven Agency, Wrocław). Piszesz posty na Facebook po polsku.
