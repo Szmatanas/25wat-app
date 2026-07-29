@@ -524,6 +524,45 @@ Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/content/proofread', async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'Brak tekstu' });
+  try {
+    const sys = `Jestes korektorem jezykowym marki 25wat. Poprawiasz tekst posta social media - TYLKO jezykowo, nie zmieniasz sensu, dlugosci ani struktury.
+
+Zakres poprawek:
+- Interpunkcja: przecinki, kropki, myslniki krotkie (-) zamieniaj na polpauzy (\u2013) tam gdzie gramatycznie wlasciwe
+- Ortografia i gramatyka
+- Powtorzenia lekyskalne - zamien na synonimy
+- Stylistyka: usun kalki z angielskiego, korpomowe sformulowania, puste slogany, nadmiernie poprawne/sztywne konstrukcje ktore brzmia jak AI
+- Tekst ma brzmiec naturalnie, jak napisany przez czlowieka - nie poprawiaj na sile, jesli oryginal juz brzmi dobrze
+
+NIE ROB: nie zmieniaj tresci merytorycznej, nie wydluzaj, nie skracaj, nie dodawaj nowych mysli, nie zmieniaj tonu.
+
+Odpowiedz TYLKO w formacie JSON: {"corrected":"poprawiony tekst z enterami jako nowe linie"}`;
+
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys, messages: [{ role: 'user', content: 'Tekst do korekty:\n' + text }] })
+    });
+    if (!r.ok) { const e = await r.text(); throw new Error('Claude ' + r.status + ': ' + e); }
+    const data = await r.json();
+    const raw = (data.content.find(b => b.type === 'text')?.text || '{}').replace(/```json|```/g,'').trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch(e) {
+      const cleaned = raw.replace(/[\u201c\u201d\u201e\u201f]/g,'"').replace(/[\u2018\u2019]/g,"'").replace(/,(\s*[}\]])/g,'$1');
+      parsed = JSON.parse(cleaned);
+    }
+    res.json({ corrected: parsed.corrected || text });
+  } catch(e) {
+    console.error('content/proofread:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/account/chat', async (req, res) => {
   const { message, systemPrompt } = req.body;
   if (!message) return res.status(400).json({ error: 'Brak wiadomości' });
