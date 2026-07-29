@@ -460,7 +460,6 @@ ZAKAZY TREŚCI:
 FORMAT FB:
 - Długość: 150-250 słów
 - Emoji: max 2-3, tylko jako separatory sekcji, nie dekoracja
-- Hashtagi: 3-5 na końcu, tylko w polu hashtags - NIE w treści posta
 - CTA na końcu: pytanie do odbiorcy lub zaproszenie do kontaktu
 
 UNIKAJ FORM TYPOWYCH DLA AI:
@@ -498,12 +497,11 @@ Kazda propozycja inny kat narracyjny:
 4. Angażujący - pytanie otwarte, zaproszenie do dyskusji
 
 Wazne zasady:
-- W polu content NIE umieszczaj hashtagow - ida tylko do pola hashtags
 - W tresci uzyj punktorow jako • (kropka) nie jako myslniki
 - Pierwsze zdanie bez imienia autora, bez "Czesc"
 
 Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
-{"posts":[{"type":"edukacyjny","title":"max 5 slow","content":"tresc BEZ hashtagow z enterami jako nowe linie","hashtags":["tag1","tag2","tag3"]},{"type":"storytelling","title":"...","content":"...","hashtags":[...]},{"type":"prowokacyjny","title":"...","content":"...","hashtags":[...]},{"type":"angażujący","title":"...","content":"...","hashtags":[...]}]}`;
+{"posts":[{"type":"edukacyjny","title":"max 5 slow","content":"tresc z enterami jako nowe linie"},{"type":"storytelling","title":"...","content":"..."},{"type":"prowokacyjny","title":"...","content":"..."},{"type":"angażujący","title":"...","content":"..."}]}`;
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
