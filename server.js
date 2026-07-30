@@ -347,7 +347,8 @@ Dostepne akcje:
 - "change_color": klient chce innej kolorystyki / palety / tla
 - "restyle": klient chce zmiany stylu grafiki (np. mniej ilustracji, bardziej flat/minimalistyczne, inny nastroj, inna kompozycja, cos "dziwne")
 - "change_photo": klient chce innego zdjecia albo inaczej pokazanej osoby
-- "edit_copy": klient chce zmienic tekst posta, nie sam design
+- "change_headline": klient chce zmienic naglowek / tekst WIDOCZNY NA SAMEJ GRAFICE (np. "zmien naglowek na...", "popraw tekst na grafice", "niech na obrazku bedzie inny tytul") - to NIE jest to samo co edit_copy
+- "edit_copy": klient chce zmienic tresc POSTA (podpis pod grafika), nie tekst na samej grafice
 - "clarify": NIE jest jasne o co konkretnie chodzi - zadaj JEDNO precyzyjne pytanie dopytujace, NIE zgaduj
 
 Dostepne pary kolorow (indeks: tlo / tekst / akcent) - UZYWAJ TYCH FAKTYCZNYCH KOLOROW zeby wybrac targetColorPairIdx, nie zgaduj numeru:
@@ -361,7 +362,7 @@ Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? col
 
 KRYTYCZNA ZASADA: jesli ponizej w historii rozmowy widac, ze juz wczesniej zadales pytanie typu clarify na ten sam temat i klient odpowiedzial (nawet ogolnikowo, nawet "po prostu wykonaj") - NIE WOLNO Ci zwrocic clarify drugi raz z rzedu na ten sam temat. Zamiast tego podejmij najlepsza mozliwa decyzje na podstawie calej rozmowy i wykonaj akcje. Maksymalnie JEDNO dopytanie na dany temat, potem dzialaj.
 
-Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|edit_copy|clarify","topic":"color|photo|style|copy|other - czego NAJBARDZIEJ dotyczy uwaga klienta, wypelnij zawsze niezaleznie od action","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color dopasowana do FAKTYCZNYCH kolorow opisanych powyzej, w innym przypadku null"}`;
+Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|change_headline|edit_copy|clarify","topic":"color|photo|style|headline|copy|other - czego NAJBARDZIEJ dotyczy uwaga klienta, wypelnij zawsze niezaleznie od action","note":"krotka, precyzyjna instrukcja stylu po angielsku dla akcji restyle, w innym przypadku null","clarify":"pytanie po polsku dla akcji clarify, w innym przypadku null","targetColorPairIdx":"liczba 0-4 dla change_color dopasowana do FAKTYCZNYCH kolorow opisanych powyzej, w innym przypadku null","newHeadline":"nowy naglowek na grafike po polsku, max 6 slow, dla akcji change_headline, w innym przypadku null"}`;
 
   try {
     const historyText = Array.isArray(history) && history.length
