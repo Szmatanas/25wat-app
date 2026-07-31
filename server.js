@@ -23,13 +23,19 @@ const COMPETITORS = [
   { name: 'W Praktyce AI', query: 'W Praktyce AI automatyzacja Polska content 2026' },
   { name: 'Agenci.ai', query: 'Agenci.ai Polska social media content 2026' },
 ];
-async function tavilySearch(query, domains) {
+async function tavilySearchFull(query, domains) {
   const body = { api_key: TAVILY_KEY, query, search_depth: 'basic', max_results: 4 };
   if (Array.isArray(domains) && domains.length) body.include_domains = domains;
   const res = await fetch('https://api.tavily.com/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error('Tavily ' + res.status);
   const data = await res.json();
-  return data.results.map(r => '[' + r.title + ']\n' + r.content).join('\n\n---\n\n');
+  const text = data.results.map(r => '[' + r.title + ']\n' + r.content).join('\n\n---\n\n');
+  const sources = data.results.slice(0, 3).map(r => ({ title: r.title, url: r.url }));
+  return { text, sources };
+}
+async function tavilySearch(query, domains) {
+  const r = await tavilySearchFull(query, domains);
+  return r.text;
 }
 const TREND_PORTALS = ['bankier.pl','antyweb.pl','spidersweb.pl','wirtualnemedia.pl','socialpress.pl','nowymarketing.pl','businessinsider.com.pl'];
 const COMPETITOR_DOMAINS = ['linkedin.com'];
@@ -70,21 +76,21 @@ app.post('/api/research', async (req, res) => {
 app.post('/api/research/auto', async (req, res) => {
   try {
     const results = [];
-    const comp = await Promise.allSettled(COMPETITORS.map(async (c) => {
-      const ctx = await tavilySearch(c.query, COMPETITOR_DOMAINS);
-      if (!ctx || ctx.trim().length < 30) {
-        return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true } };
-      }
-      const sys = 'Jestes analitykiem w polskiej agencji 25wat. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla 25wat - max 8 slow","threat_level":"low|medium|high"}';
-      return { name: c.name, analysis: await claude(sys, ctx) };
-    }));
-    comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
     const now = new Date();
     const monthsPl = ['styczen','luty','marzec','kwiecien','maj','czerwiec','lipiec','sierpien','wrzesien','pazdziernik','listopad','grudzien'];
     const dateLabel = monthsPl[now.getMonth()] + ' ' + now.getFullYear();
-    const tCtx = await tavilySearch('AI automatyzacja marketing B2B Polska ' + dateLabel, TREND_PORTALS);
+    const comp = await Promise.allSettled(COMPETITORS.map(async (c) => {
+      const { text: ctx, sources } = await tavilySearchFull(c.query, COMPETITOR_DOMAINS);
+      if (!ctx || ctx.trim().length < 30) {
+        return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
+      }
+      const sys = 'Jestes analitykiem w polskiej agencji 25wat. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla 25wat - max 8 slow","threat_level":"low|medium|high"}';
+      return { name: c.name, analysis: await claude(sys, ctx), sources, checkedAt: dateLabel };
+    }));
+    comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
+    const { text: tCtx, sources: trendSources } = await tavilySearchFull('AI automatyzacja marketing B2B Polska ' + dateLabel, TREND_PORTALS);
     const tSys = 'Jestes analitykiem content w 25wat. Trendy AI i marketing B2B Polska teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 dla 25wat - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
-    results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx) });
+    results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx), sources: trendSources, checkedAt: dateLabel });
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
