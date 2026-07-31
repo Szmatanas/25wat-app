@@ -72,6 +72,9 @@ app.post('/api/research/auto', async (req, res) => {
     const results = [];
     const comp = await Promise.allSettled(COMPETITORS.map(async (c) => {
       const ctx = await tavilySearch(c.query, COMPETITOR_DOMAINS);
+      if (!ctx || ctx.trim().length < 30) {
+        return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true } };
+      }
       const sys = 'Jestes analitykiem w polskiej agencji 25wat. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla 25wat - max 8 slow","threat_level":"low|medium|high"}';
       return { name: c.name, analysis: await claude(sys, ctx) };
     }));
