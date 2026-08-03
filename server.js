@@ -316,29 +316,35 @@ Build the entire composition around this photo. Modify only the surrounding grap
 
     const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
 
-    const form = new FormData();
-    form.append('model', 'gpt-image-1');
-    form.append('size', size);
+    // Responses API + image_generation tool: model sam decyduje jak zbudowac obraz
+    // na podstawie calego kontekstu (tekst + obrazy), zamiast statycznego images/edits.
+    const imageContentParts = [];
     for (const f of references) {
       const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
-      form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
+      imageContentParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
     }
     if (wantsPhoto) {
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
-      const photoBuf = Buffer.from(b64in, 'base64');
-      form.append('image[]', new Blob([photoBuf], { type: 'image/jpeg' }), 'real_photo.jpg');
+      imageContentParts.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${b64in}` });
     }
-    form.append('prompt', prompt);
 
-    const imgReq = await fetch('https://api.openai.com/v1/images/edits', {
+    const promptForApi = prompt + '\n\nWygeneruj teraz obraz tego posta przy uzyciu narzedzia image_generation. Nie odpowiadaj tekstem - wywolaj narzedzie i zwroc obraz.';
+
+    const responsesReq = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
-      body: form
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
+        tools: [{ type: 'image_generation', size }],
+        tool_choice: { type: 'image_generation' }
+      })
     });
-    const imgData = await imgReq.json();
-    if (imgData.error) throw new Error('OpenAI: ' + imgData.error.message);
-    const b64 = imgData.data?.[0]?.b64_json;
-    if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
+    const respData = await responsesReq.json();
+    if (respData.error) throw new Error('OpenAI: ' + respData.error.message);
+    const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
+    if (!imgCall || !imgCall.result) throw new Error('OpenAI nie zwrocil obrazu (brak image_generation_call w output)');
+    const b64 = imgCall.result;
 
     res.json({
       image: 'data:image/png;base64,' + b64,
