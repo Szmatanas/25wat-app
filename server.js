@@ -99,8 +99,8 @@ app.post('/api/design/generate-photo', async (req, res) => {
   const { postTitle } = req.body;
   const hasDescription = !!(postTitle && postTitle.trim().length > 0);
   const prompt = hasDescription
-    ? `Candid editorial portrait, photorealistic, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the person's appearance, clothing, setting and activity, do not default to generic office attire unless the description itself calls for it: ${postTitle}.`
-    : `Candid editorial portrait of a confident person in their 30s with a Central European appearance (typical of Poland), wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio.`;
+    ? `Photorealistic editorial image, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the subject's appearance, setting and activity - the subject may be a person, an object, an animal, a creature, a mascot or anything else described below. Do not force a human figure, generic office attire or any specific ethnicity/appearance unless the description itself explicitly calls for it: ${postTitle}.`
+    : `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Vary the person's ethnicity and appearance naturally and diversely across generations - do not default to any single ethnicity or appearance every time.`;
   try {
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
