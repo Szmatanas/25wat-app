@@ -439,21 +439,13 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
     const photoInstruction = wantsPhoto ? `Ostatni dolaczony obraz referencyjny (przed poprzednimi slajdami karuzeli, jesli sa) to prawdziwe zdjecie osoby z posta - zachowaj jej tozsamosc 1:1 (twarz, wlosy, ubranie, proporcje). Nie zmieniaj tej osoby.` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem.';
 
-    const generatedSlides = [];
-    const priorSlideParts = [];
-
-    for (let i = 0; i < slides.length; i++) {
-      const slide = slides[i];
+    const generatedSlides = await Promise.all(slides.map(async (slide, i) => {
       const headlineInstruction = `Uzyj DOKLADNIE tego headline, nie zmieniaj tresci: "${slide.headline}"` + (slide.subtext ? ` Podtekst/dodatkowa linia: "${slide.subtext}"` : '');
-      const carouselInstruction = i === 0
-        ? `To jest SLAJD 1 z ${slides.length} w karuzeli. Ten slajd ustanawia styl wizualny (tlo, typografia, uklad) dla calej karuzeli.`
-        : `To jest SLAJD ${i + 1} z ${slides.length} w karuzeli. Wczesniejsze slajdy sa dolaczone jako obrazy referencyjne (oznaczone jako "poprzednie slajdy" nizej) - ZACHOWAJ IDENTYCZNY styl: to samo tlo, ta sama typografia, ten sam uklad graficzny, ten sam charakter. Zmienia sie WYLACZNIE tekst/headline.`;
-
+      const carouselInstruction = `To jest SLAJD ${i + 1} z ${slides.length} karuzeli. Wszystkie slajdy tej karuzeli generowane sa rownolegle na podstawie tych samych referencji i tej samej pary kolorow - zachowaj IDENTYCZNY styl wizualny (typografia, kompozycja, elementy graficzne) jak w referencjach, tak zeby caly zestaw wygladal jednolicie.`;
       const prompt = `${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${carouselInstruction}\n${photoInstruction}\n${styleInstruction}\n\nTresc calego posta (kontekst):\n${postText}\n\nPrzygotuj grafike TEGO SLAJDU zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
 
       const imageContentParts = [...baseReferenceParts];
       if (photoPart) imageContentParts.push(photoPart);
-      imageContentParts.push(...priorSlideParts);
 
       const promptForApi = prompt + '\n\nWygeneruj teraz obraz tego slajdu przy uzyciu narzedzia image_generation. Nie odpowiadaj tekstem - wywolaj narzedzie i zwroc obraz.';
 
@@ -474,9 +466,8 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
       const b64 = imgCall.result;
       const imageDataUrl = 'data:image/png;base64,' + b64;
 
-      generatedSlides.push({ image: imageDataUrl, headline: slide.headline, subtext: slide.subtext || '' });
-      priorSlideParts.push({ type: 'input_image', image_url: imageDataUrl });
-    }
+      return { image: imageDataUrl, headline: slide.headline, subtext: slide.subtext || '' };
+    }));
 
     res.json({
       slides: generatedSlides,
