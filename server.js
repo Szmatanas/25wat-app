@@ -439,9 +439,17 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
     const photoInstruction = wantsPhoto ? `Ostatni dolaczony obraz referencyjny (przed poprzednimi slajdami karuzeli, jesli sa) to prawdziwe zdjecie osoby z posta - zachowaj jej tozsamosc 1:1 (twarz, wlosy, ubranie, proporcje). Nie zmieniaj tej osoby.` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem.';
 
+    const COMPOSITION_VARIANTS = [
+      "Naglowek w GORNEJ czesci kadru, flubber w PRAWYM DOLNYM rogu, doodle-strzalka wskazujaca z lewej gory na naglowek.",
+      "Naglowek WYSRODKOWANY PO LEWEJ (srodek wysokosci kadru), flubber w LEWYM DOLNYM rogu, doodle-underline podkreslajacy kluczowe slowo w naglowku.",
+      "Naglowek w DOLNEJ czesci kadru, flubber w PRAWYM GORNYM rogu, doodle-sparkle przy kluczowym slowie lub liczbie.",
+      "Naglowek PO PRAWEJ stronie kadru, flubber na dole PO SRODKU, doodle-strzalka skierowana ukosnie od naglowka w dol.",
+      "Naglowek w GORNEJ czesci PO LEWEJ, flubber przesuniety w PRAWY SRODEK kadru (nie w rogu), doodle-circle lub x-mark jako akcent przy liczbie/slowie kluczowym."
+    ];
     const generatedSlides = await Promise.all(slides.map(async (slide, i) => {
       const headlineInstruction = `Uzyj DOKLADNIE tego headline, nie zmieniaj tresci: "${slide.headline}"` + (slide.subtext ? ` Podtekst/dodatkowa linia: "${slide.subtext}"` : '');
-      const carouselInstruction = `To jest SLAJD ${i + 1} z ${slides.length} karuzeli. Wszystkie slajdy tej karuzeli generowane sa rownolegle na podstawie tych samych referencji i tej samej pary kolorow - zachowaj IDENTYCZNY styl wizualny (typografia, kompozycja, elementy graficzne) jak w referencjach, tak zeby caly zestaw wygladal jednolicie.`;
+      const compositionVariant = COMPOSITION_VARIANTS[i % COMPOSITION_VARIANTS.length];
+      const carouselInstruction = `To jest SLAJD ${i + 1} z ${slides.length} karuzeli. UZYJ TEJ SAMEJ pary kolorow, tej samej rodziny fontu i tego samego charakteru grafiki jak w referencjach - to musi wygladac jak jeden, konsekwentny zestaw. ALE nie powtarzaj identycznego ukladu na kazdym slajdzie - zastosuj TA KONKRETNA kompozycje dla tego slajdu: ${compositionVariant}`;
       const prompt = `${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${carouselInstruction}\n${photoInstruction}\n${styleInstruction}\n\nTresc calego posta (kontekst):\n${postText}\n\nPrzygotuj grafike TEGO SLAJDU zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
 
       const imageContentParts = [...baseReferenceParts];
