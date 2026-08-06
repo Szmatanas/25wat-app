@@ -361,6 +361,135 @@ Build the entire composition around this photo. Modify only the surrounding grap
   }
 });
 
+app.post('/api/design/generate-carousel', async (req, res) => {
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, styleNote, format, slideCount } = req.body;
+  if (!post) return res.status(400).json({ error: 'Brak posta' });
+  const OPENAI_KEY = process.env.OPENAI_KEY;
+
+  const pairs = [
+    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
+  ];
+  const pair = pairs[colorPairIdx ?? 2] || pairs[2];
+  const wantsPhoto = hasPhoto !== false && !!userPhoto;
+
+  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536' };
+  const size = SIZE_MAP[format] || '1024x1536';
+
+  const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
+  const LIGHT_REFS = ['light-post-4_5-example-8.png', 'light-post-square-example-5.png', 'light-post-square-example-6.png', 'light-post-square-example-7.png'];
+  const references = pair.bgName === 'dark' ? DARK_REFS : LIGHT_REFS;
+
+  try {
+    const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/schemat/schemat.md');
+    const schemaText = fs.readFileSync(schemaPath, 'utf8');
+    const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
+
+    const postText = `Tytul: ${post.title || ''}\n${post.content || ''}`;
+
+    const planPrompt = `Jestes Senior Content Designerem w agencji 25wat. Dzielisz post na karuzele (wielosladowa grafika na social media).
+Zasady:
+- ${slideCount ? `Wygeneruj dokladnie ${slideCount} slajdow.` : 'Wybierz optymalna liczbe slajdow (4-6) w zaleznosci od tresci - nie za malo, nie za duzo.'}
+- Kazdy slajd ma: "headline" (max 3 linie, konkret, zero ogolnikow) i opcjonalnie "subtext" (1 krotkie zdanie, moze byc puste).
+- Pierwszy slajd to hook - musi zatrzymac scrolla.
+- Ostatni slajd to CTA lub podsumowanie.
+- Nie powtarzaj tych samych fraz miedzy slajdami.
+- Zero hashtagow, zero pustych sloganow.
+
+Tresc posta:
+${postText}
+
+Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
+{"slides":[{"headline":"...","subtext":"..."}]}`;
+
+    const planReq = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: planPrompt }] }]
+      })
+    });
+    const planData = await planReq.json();
+    if (planData.error) throw new Error('OpenAI (plan): ' + planData.error.message);
+    const planMsg = (planData.output || []).find(item => item.type === 'message');
+    const planTextPart = planMsg && (planMsg.content || []).find(c => c.type === 'output_text');
+    if (!planTextPart) throw new Error('OpenAI nie zwrocil planu slajdow');
+    let rawPlan = planTextPart.text.trim();
+    if (rawPlan.startsWith('```')) rawPlan = rawPlan.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+    const plan = JSON.parse(rawPlan);
+    const slides = (plan.slides || []).slice(0, 8);
+    if (!slides.length) throw new Error('Plan karuzeli jest pusty');
+
+    const baseReferenceParts = [];
+    for (const f of references) {
+      const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
+      baseReferenceParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
+    }
+    let photoPart = null;
+    if (wantsPhoto) {
+      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      photoPart = { type: 'input_image', image_url: `data:image/jpeg;base64,${b64in}` };
+    }
+
+    const colorInstruction = `UZYJ DOKLADNIE tej pary kolorow, nie wybieraj innej z tabeli w schemacie: tlo ${pair.bg} (${pair.bgName}), tekst ${pair.text}, akcent ${pair.accent} (${pair.accentName}).`;
+    const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
+    const photoInstruction = wantsPhoto ? `Ostatni dolaczony obraz referencyjny (przed poprzednimi slajdami karuzeli, jesli sa) to prawdziwe zdjecie osoby z posta - zachowaj jej tozsamosc 1:1 (twarz, wlosy, ubranie, proporcje). Nie zmieniaj tej osoby.` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem.';
+
+    const generatedSlides = [];
+    const priorSlideParts = [];
+
+    for (let i = 0; i < slides.length; i++) {
+      const slide = slides[i];
+      const headlineInstruction = `Uzyj DOKLADNIE tego headline, nie zmieniaj tresci: "${slide.headline}"` + (slide.subtext ? ` Podtekst/dodatkowa linia: "${slide.subtext}"` : '');
+      const carouselInstruction = i === 0
+        ? `To jest SLAJD 1 z ${slides.length} w karuzeli. Ten slajd ustanawia styl wizualny (tlo, typografia, uklad) dla calej karuzeli.`
+        : `To jest SLAJD ${i + 1} z ${slides.length} w karuzeli. Wczesniejsze slajdy sa dolaczone jako obrazy referencyjne (oznaczone jako "poprzednie slajdy" nizej) - ZACHOWAJ IDENTYCZNY styl: to samo tlo, ta sama typografia, ten sam uklad graficzny, ten sam charakter. Zmienia sie WYLACZNIE tekst/headline.`;
+
+      const prompt = `${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${carouselInstruction}\n${photoInstruction}\n${styleInstruction}\n\nTresc calego posta (kontekst):\n${postText}\n\nPrzygotuj grafike TEGO SLAJDU zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
+
+      const imageContentParts = [...baseReferenceParts];
+      if (photoPart) imageContentParts.push(photoPart);
+      imageContentParts.push(...priorSlideParts);
+
+      const promptForApi = prompt + '\n\nWygeneruj teraz obraz tego slajdu przy uzyciu narzedzia image_generation. Nie odpowiadaj tekstem - wywolaj narzedzie i zwroc obraz.';
+
+      const responsesReq = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({
+          model: 'gpt-5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
+          tools: [{ type: 'image_generation', size }],
+          tool_choice: { type: 'image_generation' }
+        })
+      });
+      const respData = await responsesReq.json();
+      if (respData.error) throw new Error(`OpenAI (slajd ${i + 1}): ` + respData.error.message);
+      const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
+      if (!imgCall || !imgCall.result) throw new Error(`OpenAI nie zwrocil obrazu dla slajdu ${i + 1}`);
+      const b64 = imgCall.result;
+      const imageDataUrl = 'data:image/png;base64,' + b64;
+
+      generatedSlides.push({ image: imageDataUrl, headline: slide.headline, subtext: slide.subtext || '' });
+      priorSlideParts.push({ type: 'input_image', image_url: imageDataUrl });
+    }
+
+    res.json({
+      slides: generatedSlides,
+      pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
+      format: format || 'post-4-5',
+      size
+    });
+  } catch (e) {
+    console.error('generate-carousel:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/design/account-action', async (req, res) => {
   const { message, post, colorPairIdx, hasPhoto, history } = req.body;
   const sys = `Jestes Account Managerem w agencji 25wat. Klient napisal chaotyczna, potocznie sformulowana uwage o designie posta, ktory wlasnie zostal wygenerowany. Twoim zadaniem jest zdecydowac JAKA AKCJE wykonac - nie realizuj jej samemu, tylko sklasyfikuj.
