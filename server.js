@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors({
   origin: ['https://aisomeboost.vercel.app', 'https://aisomeboost.netlify.app', 'http://localhost:3000', 'http://localhost:5500'],
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: false
 }));
 app.use(express.json({ limit: '15mb' }));
