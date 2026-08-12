@@ -911,10 +911,35 @@ INTERPUNKCJA I JĘZYK:
 - Zdania krótkie. Maksymalnie 2 przecinki w jednym zdaniu.
 - Unikaj strony biernej ("zostało wdrożone" → "wdrożyliśmy")`;
 
+async function getProjectBrandContext(projectId) {
+  if (!projectId) return null;
+  try {
+    const result = await pool.query(
+      "SELECT category, text_content FROM brand_assets WHERE project_id = $1 AND category IN ('brand_context','tone_of_voice','ai_context') AND text_content IS NOT NULL ORDER BY created_at DESC",
+      [projectId]
+    );
+    if (!result.rows.length) return null;
+    const byCat = {};
+    result.rows.forEach(r => { if (!byCat[r.category]) byCat[r.category] = r.text_content; });
+    const parts = [];
+    if (byCat.brand_context) parts.push('BRAND STRATEGY:\n' + byCat.brand_context);
+    if (byCat.tone_of_voice) parts.push('TONE OF VOICE:\n' + byCat.tone_of_voice);
+    if (byCat.ai_context) parts.push('AI CONTEXT (design, konkurencja):\n' + byCat.ai_context);
+    return parts.length ? parts.join('\n\n') : null;
+  } catch (e) {
+    console.error('getProjectBrandContext:', e.message);
+    return null;
+  }
+}
+
 app.post('/api/content/generate', async (req, res) => {
-  const { topic } = req.body;
+  const { topic, projectId } = req.body;
   if (!topic) return res.status(400).json({ error: 'Brak tematu' });
   try {
+    const customBrandContext = await getProjectBrandContext(projectId);
+    const systemPrompt = customBrandContext
+      ? customBrandContext + '\n\n---\n\nPisz posty na Facebook po polsku, zgodnie z powyzszym kontekstem marki (strategia, tone of voice).'
+      : BRAND_VOICE;
     const prompt = `Napisz 4 rozne propozycje postow na Facebook dla agencji 25wat na temat: "${topic}".
 
 ZASADY FORMATU FB:
@@ -940,7 +965,7 @@ Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: BRAND_VOICE, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, system: systemPrompt, messages: [{ role: 'user', content: prompt }] })
     });
     if (!r.ok) { const e = await r.text(); throw new Error('Claude ' + r.status + ': ' + e); }
     const data = await r.json();
