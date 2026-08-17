@@ -374,7 +374,7 @@ app.post('/api/research/auto', async (req, res) => {
       results.push({ type: 'competitors_missing', checkedAt: dateLabel });
     } else {
       const comp = await Promise.allSettled(activeCompetitors.map(async (c) => {
-        const { text: ctx, sources } = await tavilySearchFull(c.query, COMPETITOR_DOMAINS);
+        const { text: ctx, sources } = await tavilySearchFull(c.query, c.domains || COMPETITOR_DOMAINS);
         if (!ctx || ctx.trim().length < 30) {
           return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
         }
@@ -945,7 +945,16 @@ async function getProjectCompetitors(projectId) {
       );
       const text = result.rows[0] && result.rows[0].text_content;
       if (text) {
-        return text.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l.length > 0).map(name => ({ name, query: name + ' social media content 2026' }));
+        return text.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l.length > 0).map(line => {
+          const parts = line.split('|').map(p => p.trim());
+          const name = parts[0] || line;
+          const url = parts[1] || '';
+          let domain = '';
+          if (url) {
+            try { domain = new URL(/^https?:\/\//.test(url) ? url : ('https://' + url)).hostname.replace(/^www\./, ''); } catch (e) {}
+          }
+          return { name, query: name + ' social media content 2026', domains: domain ? [domain, 'linkedin.com'] : undefined };
+        });
       }
     }
   } catch (e) {
