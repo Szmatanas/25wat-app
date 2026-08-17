@@ -961,6 +961,7 @@ async function getProjectTrendsFocus(projectId) {
 
 async function getProjectBrandContext(projectId) {
   if (!projectId) return null;
+  if (Number(projectId) === LEGACY_25WAT_PROJECT_ID) return null;
   try {
     const result = await pool.query(
       "SELECT category, text_content FROM brand_assets WHERE project_id = $1 AND category IN ('brand_context','tone_of_voice','ai_context') AND text_content IS NOT NULL ORDER BY created_at DESC",
