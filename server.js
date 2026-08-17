@@ -357,12 +357,14 @@ app.post('/api/research', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/research/auto', async (req, res) => {
+  const { projectId } = req.body || {};
   try {
     const results = [];
     const now = new Date();
     const monthsPl = ['styczen','luty','marzec','kwiecien','maj','czerwiec','lipiec','sierpien','wrzesien','pazdziernik','listopad','grudzien'];
     const dateLabel = monthsPl[now.getMonth()] + ' ' + now.getFullYear();
-    const comp = await Promise.allSettled(COMPETITORS.map(async (c) => {
+    const activeCompetitors = await getProjectCompetitors(projectId);
+    const comp = await Promise.allSettled(activeCompetitors.map(async (c) => {
       const { text: ctx, sources } = await tavilySearchFull(c.query, COMPETITOR_DOMAINS);
       if (!ctx || ctx.trim().length < 30) {
         return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
@@ -371,8 +373,9 @@ app.post('/api/research/auto', async (req, res) => {
       return { name: c.name, analysis: await claude(sys, ctx), sources, checkedAt: dateLabel };
     }));
     comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
-    const { text: tCtx, sources: trendSources } = await tavilySearchFull('AI automatyzacja marketing B2B Polska ' + dateLabel, TREND_PORTALS);
-    const tSys = 'Jestes analitykiem content w 25wat. Trendy AI i marketing B2B Polska teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 dla 25wat - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
+    const activeTrendsFocus = await getProjectTrendsFocus(projectId);
+    const { text: tCtx, sources: trendSources } = await tavilySearchFull(activeTrendsFocus + ' ' + dateLabel, TREND_PORTALS);
+    const tSys = 'Jestes analitykiem content w 25wat. Trendy: ' + activeTrendsFocus + ' teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 dla 25wat - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
     results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx), sources: trendSources, checkedAt: dateLabel });
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
@@ -910,6 +913,40 @@ INTERPUNKCJA I JĘZYK:
 - Nie stawiaj przecinka przed "i" łączącym dwa elementy
 - Zdania krótkie. Maksymalnie 2 przecinki w jednym zdaniu.
 - Unikaj strony biernej ("zostało wdrożone" → "wdrożyliśmy")`;
+
+async function getProjectCompetitors(projectId) {
+  if (!projectId) return COMPETITORS;
+  try {
+    const result = await pool.query(
+      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'competitors' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const text = result.rows[0] && result.rows[0].text_content;
+    if (!text) return COMPETITORS;
+    const lines = text.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l.length > 0);
+    if (!lines.length) return COMPETITORS;
+    return lines.map(name => ({ name, query: name + ' social media content 2026' }));
+  } catch (e) {
+    console.error('getProjectCompetitors:', e.message);
+    return COMPETITORS;
+  }
+}
+
+async function getProjectTrendsFocus(projectId) {
+  const DEFAULT_FOCUS = 'AI automatyzacja marketing B2B Polska';
+  if (!projectId) return DEFAULT_FOCUS;
+  try {
+    const result = await pool.query(
+      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'trends_focus' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const text = result.rows[0] && result.rows[0].text_content;
+    return (text && text.trim()) ? text.trim() : DEFAULT_FOCUS;
+  } catch (e) {
+    console.error('getProjectTrendsFocus:', e.message);
+    return DEFAULT_FOCUS;
+  }
+}
 
 async function getProjectBrandContext(projectId) {
   if (!projectId) return null;
