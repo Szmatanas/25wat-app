@@ -478,10 +478,14 @@ const PHOTO_SHAPES_FLUBBER = ['flubber','circle','rounded-square'];
 const PHOTO_SHAPES_NOFLUBBER = ['circle','rounded-square'];
 
 app.post('/api/design/generate-brief', async (req, res) => {
-  const { post, colorPairIdx, hasPhoto, format, previousZone, previousAccentShape } = req.body;
+  const { post, colorPairIdx, hasPhoto, format, previousZone, previousAccentShape, projectId } = req.body;
   if (!post || !post.content) return res.status(400).json({ error: 'Brak posta' });
   const pairIdx = Number.isInteger(colorPairIdx) && COLOR_PAIRS[colorPairIdx] ? colorPairIdx : 2;
   const pair = COLOR_PAIRS[pairIdx];
+  const designAssets = await getProjectDesignAssets(projectId);
+  const brandBg = (designAssets && designAssets.colorPairs && designAssets.colorPairs.length)
+    ? designAssets.colorPairs[pairIdx % designAssets.colorPairs.length]
+    : null;
   const fmt = FORMATS[format] ? format : 'post-4-5';
   const hasAccent = pair.accentType === 'flubber';
   const accentChoices = hasPhoto ? (hasAccent ? PHOTO_SHAPES_FLUBBER : PHOTO_SHAPES_NOFLUBBER) : (hasAccent ? ACCENT_SHAPES : ['none']);
@@ -545,8 +549,8 @@ Odpowiedz TYLKO JSON bez markdown:
       align,
       accentShape: hasPhoto ? null : shapeChoice,
       photoShape: hasPhoto ? shapeChoice : null,
-      background: pair.bg,
-      textColor: pair.text,
+      background: brandBg ? brandBg.bg : pair.bg,
+      textColor: brandBg ? brandBg.text : pair.text,
       accentColor: pair.accentColor,
       doodleColor: pair.doodleColor,
       headline,
@@ -555,7 +559,7 @@ Odpowiedz TYLKO JSON bez markdown:
       assets: {
         doodle: `/assets/graphic/doodle/${doodleFile}`,
         accent: accentFile ? `/assets/graphic/${accentFolder}/${accentFile}` : null,
-        logo: pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg',
+        logo: (designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : (pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg'),
       }
     });
   } catch(e) {
@@ -590,7 +594,7 @@ const PHOTO_ARCHETYPES = {
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote, format } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = process.env.OPENAI_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -602,7 +606,9 @@ app.post('/api/design/generate-image', async (req, res) => {
     { bg: '#F2EDE3', bgName: 'beige', text: '#171717', accent: '#7648F8', accentName: 'ultraviolet' },
     { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
   ];
-  const pair = pairs[colorPairIdx ?? 2] || pairs[2];
+  const designAssets = await getProjectDesignAssets(projectId);
+  const activePairs = (designAssets && designAssets.colorPairs && designAssets.colorPairs.length) ? designAssets.colorPairs : pairs;
+  const pair = activePairs[colorPairIdx ?? 2] || activePairs[0];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
 
   const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536' };
@@ -611,10 +617,13 @@ app.post('/api/design/generate-image', async (req, res) => {
   const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
   const LIGHT_REFS = ['light-post-4_5-example-8.png', 'light-post-square-example-5.png', 'light-post-square-example-6.png', 'light-post-square-example-7.png'];
   const references = pair.bgName === 'dark' ? DARK_REFS : LIGHT_REFS;
+  const usingCustomRefs = !!(designAssets && designAssets.referenceImages && designAssets.referenceImages.length);
 
   try {
     const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/schemat/schemat.md');
-    const schemaText = fs.readFileSync(schemaPath, 'utf8');
+    const schemaText = (designAssets && designAssets.aiContextText)
+      ? ('KONTEKST MARKI I STYL WIZUALNY' + (designAssets.brandName ? ' (' + designAssets.brandName + ')' : '') + ':\n' + designAssets.aiContextText)
+      : fs.readFileSync(schemaPath, 'utf8');
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
 
     const postText = `Tytul: ${post.title || ''}\n${post.content || ''}`;
@@ -639,14 +648,27 @@ Build the entire composition around this photo. Modify only the surrounding grap
 
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
 
-    const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
+    const logoInstruction = (designAssets && designAssets.logoDataUrl)
+      ? 'Jeden z dolaczonych obrazow to dokladne logo marki - umiesc je czytelnie w rogu kompozycji (tam gdzie nie koliduje z tekstem), zachowaj dokladny ksztalt i kolory logo, nie przerysowuj go ani nie zmieniaj.'
+      : '';
+
+    const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n${logoInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
 
     // Responses API + image_generation tool: model sam decyduje jak zbudowac obraz
     // na podstawie calego kontekstu (tekst + obrazy), zamiast statycznego images/edits.
     const imageContentParts = [];
-    for (const f of references) {
-      const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
-      imageContentParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
+    if (usingCustomRefs) {
+      designAssets.referenceImages.forEach(function(img){
+        imageContentParts.push({ type: 'input_image', image_url: `data:${img.mime};base64,${img.base64}` });
+      });
+    } else {
+      for (const f of references) {
+        const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
+        imageContentParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
+      }
+    }
+    if (designAssets && designAssets.logoDataUrl) {
+      imageContentParts.push({ type: 'input_image', image_url: designAssets.logoDataUrl });
     }
     if (wantsPhoto) {
       const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
@@ -674,7 +696,7 @@ Build the entire composition around this photo. Modify only the surrounding grap
     res.json({
       image: 'data:image/png;base64,' + b64,
       prompt,
-      referencesUsed: references,
+      referencesUsed: usingCustomRefs ? 'project-reference-designs' : references,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       format: format || 'post-4-5',
       size,
@@ -1022,6 +1044,47 @@ async function getProjectBrandContext(projectId) {
   }
 }
 
+async function getProjectDesignAssets(projectId) {
+  if (!projectId || Number(projectId) === LEGACY_25WAT_PROJECT_ID) return null;
+  try {
+    const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const brandName = projRes.rows[0] ? projRes.rows[0].name : null;
+
+    const logoRes = await pool.query(
+      "SELECT file_data, mime_type FROM brand_assets WHERE project_id = $1 AND category = 'logo' AND file_data IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const refRes = await pool.query(
+      "SELECT file_data, mime_type FROM brand_assets WHERE project_id = $1 AND category = 'reference_designs' AND file_data IS NOT NULL ORDER BY created_at DESC LIMIT 4",
+      [projectId]
+    );
+    const ctxRes = await pool.query(
+      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'ai_context' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const aiContextText = ctxRes.rows[0] ? ctxRes.rows[0].text_content : '';
+
+    const hexMatches = [...new Set((aiContextText.match(/#[0-9A-Fa-f]{6}/g) || []).map(h => h.toUpperCase()))];
+    let colorPairs = null;
+    if (hexMatches.length >= 2) {
+      const c0 = hexMatches[0], c1 = hexMatches[1], c2 = hexMatches[2] || hexMatches[0];
+      colorPairs = [
+        { bg: c0, bgName: 'primary', text: c1, accent: c2, accentName: 'accent' },
+        { bg: c1, bgName: 'secondary', text: c0, accent: c2, accentName: 'accent' }
+      ];
+    }
+
+    const logoRow = logoRes.rows[0] || null;
+    const logoDataUrl = logoRow ? `data:${logoRow.mime_type || 'image/png'};base64,${logoRow.file_data.toString('base64')}` : null;
+    const referenceImages = refRes.rows.map(r => ({ base64: r.file_data.toString('base64'), mime: r.mime_type || 'image/png' }));
+
+    return { brandName, logoDataUrl, referenceImages, aiContextText, colorPairs };
+  } catch (e) {
+    console.error('getProjectDesignAssets:', e.message);
+    return null;
+  }
+}
+
 app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, requireProjectMember, async (req, res) => {
   try {
     const textResult = await pool.query(
@@ -1075,7 +1138,14 @@ app.post('/api/content/generate', async (req, res) => {
     const systemPrompt = customBrandContext
       ? customBrandContext + '\n\n---\n\nPisz posty na Facebook po polsku, zgodnie z powyzszym kontekstem marki (strategia, tone of voice).'
       : BRAND_VOICE;
-    const prompt = `Napisz 4 rozne propozycje postow na Facebook dla agencji 25wat na temat: "${topic}".
+    let brandLabel = 'agencji 25wat';
+    if (projectId && Number(projectId) !== LEGACY_25WAT_PROJECT_ID) {
+      try {
+        const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+        if (projRes.rows[0] && projRes.rows[0].name) brandLabel = 'marki ' + projRes.rows[0].name;
+      } catch (e) { console.error('brandLabel lookup:', e.message); }
+    }
+    const prompt = `Napisz 4 rozne propozycje postow na Facebook dla ${brandLabel} na temat: "${topic}".
 
 ZASADY FORMATU FB:
 - Pierwsze zdanie to HOOK - ma zatrzymac scrollowanie, max 12 slow, zaczyna sie od liczby lub prowokacyjnego stwierdzenia
