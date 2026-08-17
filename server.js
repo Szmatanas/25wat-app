@@ -281,8 +281,34 @@ app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, a
         console.error('pdf-parse:', pdfErr.message);
         return res.status(400).json({ error: 'Nie udalo sie przetworzyc PDF: ' + pdfErr.message });
       }
+    } else if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType && mimeType.startsWith('image/')) {
+      try {
+        const visionSys = 'Jestes asystentem ktory czyta zdjecia/skany dokumentow marketingowych (brand book, strategia, tone of voice, przyklady kolorow) i wypisuje z nich caly istotny tekst oraz opis wizualny (kolory - podaj dokladne kody HEX jesli da sie je odczytac lub oszacowac, fonty, styl) w czystym tekscie po polsku. Nie dodawaj wlasnych komentarzy ani ocen - tylko fakty z obrazu.';
+        const visionRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1500,
+            system: visionSys,
+            messages: [{ role: 'user', content: [
+              { type: 'image', source: { type: 'base64', media_type: mimeType, data: fileBuffer.toString('base64') } },
+              { type: 'text', text: 'Wypisz cala tresc i opis wizualny (w tym szacowane kody HEX kolorow) tego obrazu.' }
+            ] }]
+          })
+        });
+        const visionData = await visionRes.json();
+        finalTextContent = ((visionData.content || []).find(b => b.type === 'text') || {}).text || '';
+        if (!finalTextContent) {
+          return res.status(400).json({ error: 'Nie udalo sie odczytac tresci z obrazu.' });
+        }
+        fileBuffer = null;
+      } catch (visErr) {
+        console.error('vision-extract:', visErr.message);
+        return res.status(400).json({ error: 'Nie udalo sie przetworzyc obrazu: ' + visErr.message });
+      }
     } else if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType && mimeType !== 'text/plain' && mimeType !== 'text/markdown' && !mimeType.startsWith('text/')) {
-      return res.status(400).json({ error: 'Ten kafelek przyjmuje tylko tekst (.txt, .md) lub PDF. Zdjecia wgraj w kategorii "Przyklady kompozycji" albo "Logo".' });
+      return res.status(400).json({ error: 'Ten kafelek przyjmuje tekst (.txt, .md), PDF lub obraz (PNG/JPG).' });
     }
     const result = await pool.query(
       `INSERT INTO brand_assets (project_id, category, filename, mime_type, file_data, text_content, metadata)
@@ -483,6 +509,12 @@ app.post('/api/design/generate-brief', async (req, res) => {
   const pairIdx = Number.isInteger(colorPairIdx) && COLOR_PAIRS[colorPairIdx] ? colorPairIdx : 2;
   const pair = COLOR_PAIRS[pairIdx];
   const designAssets = await getProjectDesignAssets(projectId);
+  if (projectId && Number(projectId) !== LEGACY_25WAT_PROJECT_ID) {
+    const hasAnyBrandData = designAssets && (designAssets.colorPairs || designAssets.logoDataUrl || (designAssets.referenceImages && designAssets.referenceImages.length) || designAssets.aiContextText);
+    if (!hasAnyBrandData) {
+      return res.status(400).json({ error: 'Brak danych marki dla tego projektu (Brand Strategy / AI Context / Logo / przykladowe kompozycje). Uzupelnij Baze Wiedzy Marki przed generowaniem designu.' });
+    }
+  }
   const brandBg = (designAssets && designAssets.colorPairs && designAssets.colorPairs.length)
     ? designAssets.colorPairs[pairIdx % designAssets.colorPairs.length]
     : null;
@@ -607,6 +639,12 @@ app.post('/api/design/generate-image', async (req, res) => {
     { bg: '#D0F200', bgName: 'neon', text: '#171717', accent: '#171717', accentName: 'dark' }
   ];
   const designAssets = await getProjectDesignAssets(projectId);
+  if (projectId && Number(projectId) !== LEGACY_25WAT_PROJECT_ID) {
+    const hasAnyBrandData = designAssets && (designAssets.colorPairs || designAssets.logoDataUrl || (designAssets.referenceImages && designAssets.referenceImages.length) || designAssets.aiContextText);
+    if (!hasAnyBrandData) {
+      return res.status(400).json({ error: 'Brak danych marki dla tego projektu (Brand Strategy / AI Context / Logo / przykladowe kompozycje). Uzupelnij Baze Wiedzy Marki przed generowaniem designu.' });
+    }
+  }
   const activePairs = (designAssets && designAssets.colorPairs && designAssets.colorPairs.length) ? designAssets.colorPairs : pairs;
   const pair = activePairs[colorPairIdx ?? 2] || activePairs[0];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
