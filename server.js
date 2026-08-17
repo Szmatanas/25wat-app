@@ -364,19 +364,27 @@ app.post('/api/research/auto', async (req, res) => {
     const monthsPl = ['styczen','luty','marzec','kwiecien','maj','czerwiec','lipiec','sierpien','wrzesien','pazdziernik','listopad','grudzien'];
     const dateLabel = monthsPl[now.getMonth()] + ' ' + now.getFullYear();
     const activeCompetitors = await getProjectCompetitors(projectId);
-    const comp = await Promise.allSettled(activeCompetitors.map(async (c) => {
-      const { text: ctx, sources } = await tavilySearchFull(c.query, COMPETITOR_DOMAINS);
-      if (!ctx || ctx.trim().length < 30) {
-        return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
-      }
-      const sys = 'Jestes analitykiem w polskiej agencji 25wat. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla 25wat - max 8 slow","threat_level":"low|medium|high"}';
-      return { name: c.name, analysis: await claude(sys, ctx), sources, checkedAt: dateLabel };
-    }));
-    comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
+    if (!activeCompetitors.length) {
+      results.push({ type: 'competitors_missing', checkedAt: dateLabel });
+    } else {
+      const comp = await Promise.allSettled(activeCompetitors.map(async (c) => {
+        const { text: ctx, sources } = await tavilySearchFull(c.query, COMPETITOR_DOMAINS);
+        if (!ctx || ctx.trim().length < 30) {
+          return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
+        }
+        const sys = 'Jestes analitykiem opisujacym konkurencje. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla klienta - max 8 slow","threat_level":"low|medium|high"}';
+        return { name: c.name, analysis: await claude(sys, ctx), sources, checkedAt: dateLabel };
+      }));
+      comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
+    }
     const activeTrendsFocus = await getProjectTrendsFocus(projectId);
-    const { text: tCtx, sources: trendSources } = await tavilySearchFull(activeTrendsFocus + ' ' + dateLabel, TREND_PORTALS);
-    const tSys = 'Jestes analitykiem content w 25wat. Trendy: ' + activeTrendsFocus + ' teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 dla 25wat - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
-    results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx), sources: trendSources, checkedAt: dateLabel });
+    if (!activeTrendsFocus) {
+      results.push({ type: 'trends_missing', checkedAt: dateLabel });
+    } else {
+      const { text: tCtx, sources: trendSources } = await tavilySearchFull(activeTrendsFocus + ' ' + dateLabel, TREND_PORTALS);
+      const tSys = 'Jestes analitykiem content. Trendy: ' + activeTrendsFocus + ' teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
+      results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx), sources: trendSources, checkedAt: dateLabel });
+    }
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
@@ -914,38 +922,41 @@ INTERPUNKCJA I JĘZYK:
 - Zdania krótkie. Maksymalnie 2 przecinki w jednym zdaniu.
 - Unikaj strony biernej ("zostało wdrożone" → "wdrożyliśmy")`;
 
+const LEGACY_25WAT_PROJECT_ID = 1;
+
 async function getProjectCompetitors(projectId) {
-  if (!projectId) return COMPETITORS;
   try {
-    const result = await pool.query(
-      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'competitors' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
-      [projectId]
-    );
-    const text = result.rows[0] && result.rows[0].text_content;
-    if (!text) return COMPETITORS;
-    const lines = text.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l.length > 0);
-    if (!lines.length) return COMPETITORS;
-    return lines.map(name => ({ name, query: name + ' social media content 2026' }));
+    if (projectId) {
+      const result = await pool.query(
+        "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'competitors' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+        [projectId]
+      );
+      const text = result.rows[0] && result.rows[0].text_content;
+      if (text) {
+        return text.split('\n').map(l => l.replace(/^[-*]\s*/, '').trim()).filter(l => l.length > 0).map(name => ({ name, query: name + ' social media content 2026' }));
+      }
+    }
   } catch (e) {
     console.error('getProjectCompetitors:', e.message);
-    return COMPETITORS;
   }
+  return (Number(projectId) === LEGACY_25WAT_PROJECT_ID) ? COMPETITORS : [];
 }
 
 async function getProjectTrendsFocus(projectId) {
   const DEFAULT_FOCUS = 'AI automatyzacja marketing B2B Polska';
-  if (!projectId) return DEFAULT_FOCUS;
   try {
-    const result = await pool.query(
-      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'trends_focus' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
-      [projectId]
-    );
-    const text = result.rows[0] && result.rows[0].text_content;
-    return (text && text.trim()) ? text.trim() : DEFAULT_FOCUS;
+    if (projectId) {
+      const result = await pool.query(
+        "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'trends_focus' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+        [projectId]
+      );
+      const text = result.rows[0] && result.rows[0].text_content;
+      if (text && text.trim()) return text.trim();
+    }
   } catch (e) {
     console.error('getProjectTrendsFocus:', e.message);
-    return DEFAULT_FOCUS;
   }
+  return (Number(projectId) === LEGACY_25WAT_PROJECT_ID) ? DEFAULT_FOCUS : null;
 }
 
 async function getProjectBrandContext(projectId) {
@@ -968,6 +979,51 @@ async function getProjectBrandContext(projectId) {
     return null;
   }
 }
+
+app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const textResult = await pool.query(
+      "SELECT category, text_content FROM brand_assets WHERE project_id = $1 AND category IN ('brand_context','tone_of_voice') AND text_content IS NOT NULL ORDER BY created_at DESC",
+      [req.projectId]
+    );
+    const byCat = {};
+    textResult.rows.forEach(r => { if (!byCat[r.category]) byCat[r.category] = r.text_content; });
+    if (!byCat.brand_context && !byCat.tone_of_voice) {
+      return res.status(400).json({ error: 'Wgraj najpierw Brand Strategy lub Tone of Voice (tekst albo plik) - AI potrzebuje materialu zrodlowego.' });
+    }
+
+    const imgResult = await pool.query(
+      "SELECT file_data, mime_type FROM brand_assets WHERE project_id = $1 AND category = 'reference_designs' AND file_data IS NOT NULL ORDER BY created_at DESC LIMIT 4",
+      [req.projectId]
+    );
+
+    const sys = 'Jestes Strategiem Brandowym. Na podstawie materialow zrodlowych klienta (brand strategy, tone of voice, przykladowe kreacje graficzne) zbuduj DOKUMENT "AI CONTEXT" ktory bedzie zasilal generowanie tresci i grafik dla tej marki.\n\nStruktura dokumentu (trzymaj sie dokladnie tych sekcji, po polsku):\n\n## PALETA KOLOROW\n- Jesli widac kolory na przykladowych grafikach - wypisz je opisowo. Jesli brak grafik - napisz "brak danych - pomin, dopisac pozniej".\n\n## TYPOGRAFIA\n- Charakter fontu widoczny na grafikach (szeryfowy/bezszeryfowy, grubosc, styl naglowkow). Jesli brak danych - napisz "brak danych - pomin".\n\n## KOMPOZYCJA I HIERARCHIA\n- Wzorzec ukladu widoczny na przykladowych kreacjach (logo, tekst, ilosc bialej przestrzeni). Jesli brak - "brak danych - pomin".\n\n## STYL ZDJEC\n- Jesli na przykladach sa zdjecia - opisz styl. Jesli brak - "brak danych - pomin".\n\n## CZERWONE LINIE\n- Czego marka na pewno unika, wywnioskowane z brand strategy/tone of voice.\n\n## VOICE & TON (podsumowanie)\n- 3-4 zdania kluczowych cech tonu marki, wyciagniete z materialow.\n\nNie zmyslaj kolorow, fontow ani faktow ktorych nie widac w materiale. Gdy czegos brakuje - napisz wprost "brak danych - pomin, dopisac pozniej" zamiast wymyslac.';
+
+    const contentBlocks = [];
+    if (byCat.brand_context) contentBlocks.push({ type: 'text', text: 'BRAND STRATEGY:\n' + byCat.brand_context });
+    if (byCat.tone_of_voice) contentBlocks.push({ type: 'text', text: 'TONE OF VOICE:\n' + byCat.tone_of_voice });
+    imgResult.rows.forEach(row => {
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: row.mime_type || 'image/png', data: row.file_data.toString('base64') }
+      });
+    });
+    if (!imgResult.rows.length) contentBlocks.push({ type: 'text', text: '(Brak przykladowych kreacji - pomin sekcje PALETA/TYPOGRAFIA/KOMPOZYCJA/STYL ZDJEC jako "brak danych")' });
+
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys, messages: [{ role: 'user', content: contentBlocks }] })
+    });
+    const data = await r.json();
+    const generated = (data.content && data.content[0] && data.content[0].text) || '';
+    if (!generated) return res.status(500).json({ error: 'Brak odpowiedzi od AI' });
+    res.json({ generated });
+  } catch (e) {
+    console.error('generate-ai-context:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.post('/api/content/generate', async (req, res) => {
   const { topic, projectId } = req.body;
