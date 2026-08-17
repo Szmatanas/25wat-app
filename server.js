@@ -257,7 +257,7 @@ app.get('/api/projects/:projectId/assets', requireAuth, requireProjectMember, as
   }
 });
 
-const TEXT_CATEGORIES = ['ai_context', 'ai_context_rules', 'brand_context', 'tone_of_voice', 'trends_focus', 'competitors'];
+const TEXT_CATEGORIES = ['ai_context', 'ai_context_rules', 'brand_context', 'tone_of_voice', 'trends_focus', 'competitors', 'brandbook'];
 
 app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, async (req, res) => {
   const { category, filename, mimeType, fileBase64, textContent, metadata } = req.body;
@@ -1100,7 +1100,12 @@ async function getProjectDesignAssets(projectId) {
       "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'ai_context' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
       [projectId]
     );
-    const aiContextText = ctxRes.rows[0] ? ctxRes.rows[0].text_content : '';
+    const bookRes = await pool.query(
+      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'brandbook' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const brandbookText = bookRes.rows[0] ? bookRes.rows[0].text_content : '';
+    const aiContextText = (brandbookText ? ('BRANDBOOK:\n' + brandbookText + '\n\n') : '') + (ctxRes.rows[0] ? ctxRes.rows[0].text_content : '');
 
     const hexMatches = [...new Set((aiContextText.match(/#[0-9A-Fa-f]{6}/g) || []).map(h => h.toUpperCase()))];
     let colorPairs = null;
