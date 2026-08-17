@@ -15,7 +15,13 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: false
 }));
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '30mb' }));
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Plik za duzy. Maksymalny rozmiar pliku to 20MB.' });
+  }
+  next(err);
+});
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const { Pool } = pg;
