@@ -1170,6 +1170,7 @@ async function getProjectDesignAssets(projectId) {
 }
 
 app.get('/api/projects/:projectId/color-pairs', requireAuth, requireProjectMember, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const designAssets = await getProjectDesignAssets(req.projectId);
     res.json({ colorPairs: (designAssets && designAssets.colorPairs) ? designAssets.colorPairs : null });
