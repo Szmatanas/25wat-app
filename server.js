@@ -1131,13 +1131,13 @@ async function getProjectDesignAssets(projectId) {
 app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, requireProjectMember, async (req, res) => {
   try {
     const textResult = await pool.query(
-      "SELECT category, text_content FROM brand_assets WHERE project_id = $1 AND category IN ('brand_context','tone_of_voice') AND text_content IS NOT NULL ORDER BY created_at DESC",
+      "SELECT category, text_content FROM brand_assets WHERE project_id = $1 AND category IN ('brand_context','tone_of_voice','brandbook') AND text_content IS NOT NULL ORDER BY created_at DESC",
       [req.projectId]
     );
     const byCat = {};
     textResult.rows.forEach(r => { if (!byCat[r.category]) byCat[r.category] = r.text_content; });
-    if (!byCat.brand_context && !byCat.tone_of_voice) {
-      return res.status(400).json({ error: 'Wgraj najpierw Brand Strategy lub Tone of Voice (tekst albo plik) - AI potrzebuje materialu zrodlowego.' });
+    if (!byCat.brand_context && !byCat.tone_of_voice && !byCat.brandbook) {
+      return res.status(400).json({ error: 'Wgraj najpierw Brandbook, Brand Strategy lub Tone of Voice (tekst albo plik) - AI potrzebuje materialu zrodlowego.' });
     }
 
     const imgResult = await pool.query(
@@ -1145,9 +1145,10 @@ app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, req
       [req.projectId]
     );
 
-    const sys = 'Jestes Strategiem Brandowym. Na podstawie materialow zrodlowych klienta (brand strategy, tone of voice, przykladowe kreacje graficzne) zbuduj DOKUMENT "AI CONTEXT" ktory bedzie zasilal generowanie tresci i grafik dla tej marki.\n\nStruktura dokumentu (trzymaj sie dokladnie tych sekcji, po polsku):\n\n## PALETA KOLOROW\n- Jesli widac kolory na przykladowych grafikach - wypisz je opisowo. Jesli brak grafik - napisz "brak danych - pomin, dopisac pozniej".\n\n## TYPOGRAFIA\n- Charakter fontu widoczny na grafikach (szeryfowy/bezszeryfowy, grubosc, styl naglowkow). Jesli brak danych - napisz "brak danych - pomin".\n\n## KOMPOZYCJA I HIERARCHIA\n- Wzorzec ukladu widoczny na przykladowych kreacjach (logo, tekst, ilosc bialej przestrzeni). Jesli brak - "brak danych - pomin".\n\n## STYL ZDJEC\n- Jesli na przykladach sa zdjecia - opisz styl. Jesli brak - "brak danych - pomin".\n\n## CZERWONE LINIE\n- Czego marka na pewno unika, wywnioskowane z brand strategy/tone of voice.\n\n## VOICE & TON (podsumowanie)\n- 3-4 zdania kluczowych cech tonu marki, wyciagniete z materialow.\n\nNie zmyslaj kolorow, fontow ani faktow ktorych nie widac w materiale. Gdy czegos brakuje - napisz wprost "brak danych - pomin, dopisac pozniej" zamiast wymyslac.';
+    const sys = 'Jestes Strategiem Brandowym. Na podstawie materialow zrodlowych klienta (brandbook, brand strategy, tone of voice, przykladowe kreacje graficzne) zbuduj DOKUMENT "AI CONTEXT" ktory bedzie zasilal generowanie tresci i grafik dla tej marki. Jesli w materialach jest sekcja BRANDBOOK - to zrodlo najwyzszego priorytetu, nadrzedne wobec wnioskow wyciaganych z samych zdjec.\n\nStruktura dokumentu (trzymaj sie dokladnie tych sekcji, po polsku):\n\n## PALETA KOLOROW\n- KONIECZNIE podaj dokladny kod HEX (#RRGGBB) dla kazdego koloru, obok jego nazwy (np. "Rozowy/malinowy #E6007E"). Jesli w BRANDBOOK sa podane kody HEX - uzyj ich dokladnie, nie szacuj. Jesli nie ma HEX w tekscie ale widac kolory na przykladowych grafikach - oszacuj najblizszy kod HEX i zawsze go podaj - nigdy nie ograniczaj sie do samej nazwy slownej koloru. Jesli brak jakichkolwiek danych o kolorach - napisz "brak danych - pomin, dopisac pozniej".\n\n## TYPOGRAFIA\n- Charakter fontu widoczny na grafikach (szeryfowy/bezszeryfowy, grubosc, styl naglowkow). Jesli brak danych - napisz "brak danych - pomin".\n\n## KOMPOZYCJA I HIERARCHIA\n- Wzorzec ukladu widoczny na przykladowych kreacjach (logo, tekst, ilosc bialej przestrzeni). Jesli brak - "brak danych - pomin".\n\n## STYL ZDJEC\n- Jesli na przykladach sa zdjecia - opisz styl. Jesli brak - "brak danych - pomin".\n\n## CZERWONE LINIE\n- Czego marka na pewno unika, wywnioskowane z brand strategy/tone of voice.\n\n## VOICE & TON (podsumowanie)\n- 3-4 zdania kluczowych cech tonu marki, wyciagniete z materialow.\n\nNie zmyslaj kolorow, fontow ani faktow ktorych nie widac w materiale. Gdy czegos brakuje - napisz wprost "brak danych - pomin, dopisac pozniej" zamiast wymyslac.';
 
     const contentBlocks = [];
+    if (byCat.brandbook) contentBlocks.push({ type: 'text', text: 'BRANDBOOK (zrodlo najwyzszego priorytetu):\n' + byCat.brandbook });
     if (byCat.brand_context) contentBlocks.push({ type: 'text', text: 'BRAND STRATEGY:\n' + byCat.brand_context });
     if (byCat.tone_of_voice) contentBlocks.push({ type: 'text', text: 'TONE OF VOICE:\n' + byCat.tone_of_voice });
     imgResult.rows.forEach(row => {
