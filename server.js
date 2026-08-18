@@ -1183,7 +1183,7 @@ app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, req
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: sys, messages: [{ role: 'user', content: contentBlocks }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system: sys, messages: [{ role: 'user', content: contentBlocks }] })
     });
     const data = await r.json();
     const generated = (data.content && data.content[0] && data.content[0].text) || '';
