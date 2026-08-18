@@ -18,6 +18,7 @@ app.use(cors({
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
+const { parseOffice } = require('officeparser');
 app.use(express.json({ limit: '30mb' }));
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') {
@@ -285,6 +286,18 @@ app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, a
         console.error('pdf-parse:', pdfErr.message);
         return res.status(400).json({ error: 'Nie udalo sie przetworzyc PDF: ' + pdfErr.message });
       }
+    } else if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+      try {
+        const ast = await parseOffice(fileBuffer, { fileType: 'pptx' });
+        finalTextContent = (ast.toText() || '').trim().slice(0, 50000);
+        if (!finalTextContent) {
+          return res.status(400).json({ error: 'Nie udalo sie odczytac tekstu z prezentacji PowerPoint.' });
+        }
+        fileBuffer = null;
+      } catch (pptErr) {
+        console.error('officeparser pptx:', pptErr.message);
+        return res.status(400).json({ error: 'Nie udalo sie przetworzyc pliku PowerPoint: ' + pptErr.message });
+      }
     } else if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType && mimeType.startsWith('image/')) {
       try {
         const visionSys = 'Jestes asystentem ktory czyta zdjecia/skany dokumentow marketingowych (brand book, strategia, tone of voice, przyklady kolorow) i wypisuje z nich caly istotny tekst oraz opis wizualny (kolory - podaj dokladne kody HEX jesli da sie je odczytac lub oszacowac, fonty, styl) w czystym tekscie po polsku. Nie dodawaj wlasnych komentarzy ani ocen - tylko fakty z obrazu.';
@@ -312,7 +325,7 @@ app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, a
         return res.status(400).json({ error: 'Nie udalo sie przetworzyc obrazu: ' + visErr.message });
       }
     } else if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType && mimeType !== 'text/plain' && mimeType !== 'text/markdown' && !mimeType.startsWith('text/')) {
-      return res.status(400).json({ error: 'Ten kafelek przyjmuje tekst (.txt, .md), PDF lub obraz (PNG/JPG).' });
+      return res.status(400).json({ error: 'Ten kafelek przyjmuje tekst (.txt, .md), PDF, PowerPoint (.pptx) lub obraz (PNG/JPG).' });
     }
     const result = await pool.query(
       `INSERT INTO brand_assets (project_id, category, filename, mime_type, file_data, text_content, metadata)
@@ -1139,7 +1152,11 @@ app.post('/api/projects/:projectId/assets/generate-ai-context', requireAuth, req
       [req.projectId]
     );
     const byCat = {};
-    textResult.rows.forEach(r => { if (!byCat[r.category]) byCat[r.category] = r.text_content; });
+    textResult.rows.forEach(r => {
+      if (!byCat[r.category]) byCat[r.category] = [];
+      byCat[r.category].push(r.text_content);
+    });
+    Object.keys(byCat).forEach(k => { byCat[k] = byCat[k].join('\n\n---\n\n'); });
     if (!byCat.brand_context && !byCat.tone_of_voice && !byCat.brandbook) {
       return res.status(400).json({ error: 'Wgraj najpierw Brandbook, Brand Strategy lub Tone of Voice (tekst albo plik) - AI potrzebuje materialu zrodlowego.' });
     }
