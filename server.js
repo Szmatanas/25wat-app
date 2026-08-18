@@ -1124,17 +1124,18 @@ async function getProjectDesignAssets(projectId) {
     const brandbookText = bookRes.rows[0] ? bookRes.rows[0].text_content : '';
     const aiContextText = (brandbookText ? ('BRANDBOOK:\n' + brandbookText + '\n\n') : '') + (ctxRes.rows[0] ? ctxRes.rows[0].text_content : '');
 
-    const namedColorRe = /\*\*([^*\n]{2,40}?)\*\*\s*`(#[0-9A-Fa-f]{6})`/g;
     const namedColors = [];
-    const seenHex = new Set();
-    let ncMatch;
-    while ((ncMatch = namedColorRe.exec(aiContextText)) !== null) {
-      const hex = ncMatch[2].toUpperCase();
-      if (seenHex.has(hex)) continue;
-      seenHex.add(hex);
-      namedColors.push({ name: ncMatch[1].trim(), hex });
-      if (namedColors.length >= 8) break;
-    }
+    const seenHexForNames = new Set();
+    aiContextText.split('\n').forEach(line => {
+      if (namedColors.length >= 8) return;
+      const nameMatch = line.match(/\*\*([^*\n]{2,40}?)\*\*/);
+      const hexMatch = line.match(/#[0-9A-Fa-f]{6}/);
+      if (!nameMatch || !hexMatch) return;
+      const hex = hexMatch[0].toUpperCase();
+      if (seenHexForNames.has(hex)) return;
+      seenHexForNames.add(hex);
+      namedColors.push({ name: nameMatch[1].trim(), hex });
+    });
     const hexMatches = [...new Set((aiContextText.match(/#[0-9A-Fa-f]{6}/g) || []).map(h => h.toUpperCase()))];
     let colorPairs = null;
     if (namedColors.length >= 2) {
