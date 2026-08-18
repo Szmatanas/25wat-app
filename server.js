@@ -17,7 +17,7 @@ app.use(cors({
 }));
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 app.use(express.json({ limit: '30mb' }));
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') {
@@ -273,7 +273,9 @@ app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, a
     }
     if (fileBuffer && TEXT_CATEGORIES.includes(category) && mimeType === 'application/pdf') {
       try {
-        const parsed = await pdfParse(fileBuffer);
+        const parser = new PDFParse({ data: fileBuffer });
+        const parsed = await parser.getText();
+        await parser.destroy();
         finalTextContent = (parsed.text || '').trim().slice(0, 50000);
         if (!finalTextContent) {
           return res.status(400).json({ error: 'Nie udalo sie odczytac tekstu z PDF (moze to skan bez warstwy tekstowej).' });
