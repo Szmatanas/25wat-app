@@ -670,7 +670,7 @@ app.post('/api/design/generate-image', async (req, res) => {
   const pair = activePairs[colorPairIdx ?? 2] || activePairs[0];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
 
-  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536' };
+  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536', 'landscape': '1536x1024' };
   const size = SIZE_MAP[format] || '1024x1536';
 
   const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
@@ -782,7 +782,7 @@ app.post('/api/design/generate-carousel', async (req, res) => {
   const pair = pairs[colorPairIdx ?? 2] || pairs[2];
   const wantsPhoto = hasPhoto !== false && !!userPhoto;
 
-  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536' };
+  const SIZE_MAP = { 'post-1-1': '1024x1024', 'post-4-5': '1024x1536', 'story': '1024x1536', 'landscape': '1536x1024' };
   const size = SIZE_MAP[format] || '1024x1536';
 
   const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
