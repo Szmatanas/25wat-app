@@ -1296,7 +1296,7 @@ app.post('/api/content/generate', async (req, res) => {
         types: ['ekspercki','case-study','kontrariański','dyskusyjny'],
         rules: `ZASADY FORMATU LI:
 - Pierwsze zdanie to HOOK ekspercki - obserwacja, dana lub teza branzowa, max 15 slow
-- Ton biznesowy, ekspercki, bez emoji-dekoracji (max 0-2 emoji, subtelnie)
+- Ton biznesowy, ekspercki. Emoji TYLKO jako wskaznik pojedynczej kluczowej linii (np. przed CTA/pytaniem, lokalizacja, data) - max 2-3 takie akcenty, nigdy jako dekoracja calego tekstu czy zamiennik punktorow
 - Struktura: teza/obserwacja -> konkretny przyklad lub doswiadczenie -> wniosek
 - Ostatnie zdanie to zaproszenie do dyskusji branzowej (pytanie do innych profesjonalistow)
 - Dlugosc: 200-350 slow (LinkedIn = thought leadership, dluzsza forma OK)`,
