@@ -8,7 +8,6 @@ import pg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { put } from '@vercel/blob';
-import archiver from 'archiver';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -20,6 +19,7 @@ app.use(cors({
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
+const archiver = require('archiver');
 
 async function uploadImageToBlob(b64, ext) {
   const buf = Buffer.from(b64, 'base64');
