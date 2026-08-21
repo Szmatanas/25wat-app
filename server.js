@@ -8,6 +8,9 @@ import pg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { put } from '@vercel/blob';
+import { Document, Packer, Paragraph, HeadingLevel, ImageRun, PageBreak } from 'docx';
+import PDFDocument from 'pdfkit';
+import { imageSize } from 'image-size';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -20,6 +23,17 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
 const archiver = require('archiver');
+
+async function fetchImageBuffer(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return Buffer.from(await r.arrayBuffer());
+  } catch (e) {
+    console.error('fetchImageBuffer:', e.message);
+    return null;
+  }
+}
 
 async function uploadImageToBlob(b64, ext) {
   const buf = Buffer.from(b64, 'base64');
@@ -478,6 +492,82 @@ app.post('/api/research/auto', async (req, res) => {
     }
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:projectId/export/word', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const { posts } = req.body;
+    if (!Array.isArray(posts) || !posts.length) return res.status(400).json({ error: 'Brak postow do eksportu' });
+    const children = [];
+    for (let i = 0; i < posts.length; i++) {
+      const p = posts[i] || {};
+      const num = String(i + 1).padStart(2, '0');
+      const chLabel = (p.channel || 'fb').toUpperCase();
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        text: num + ' — ' + chLabel + (p.title ? ' — ' + p.title : '')
+      }));
+      if (p.thumb) {
+        const buf = await fetchImageBuffer(p.thumb);
+        if (buf) {
+          try {
+            const dim = imageSize(buf);
+            const maxW = 420;
+            const scale = dim.width > maxW ? maxW / dim.width : 1;
+            children.push(new Paragraph({
+              children: [ new ImageRun({
+                data: buf,
+                transformation: { width: Math.round(dim.width * scale), height: Math.round(dim.height * scale) }
+              }) ]
+            }));
+          } catch (e) { console.error('export/word image:', e.message); }
+        }
+      }
+      children.push(new Paragraph({ text: p.content || '' }));
+      if (i < posts.length - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
+    }
+    const doc = new Document({ sections: [{ children }] });
+    const buffer = await Packer.toBuffer(doc);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.docx"');
+    res.send(buffer);
+  } catch (e) {
+    console.error('export/word:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const { posts } = req.body;
+    if (!Array.isArray(posts) || !posts.length) return res.status(400).json({ error: 'Brak postow do eksportu' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.pdf"');
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    doc.pipe(res);
+    for (let i = 0; i < posts.length; i++) {
+      const p = posts[i] || {};
+      const num = String(i + 1).padStart(2, '0');
+      const chLabel = (p.channel || 'fb').toUpperCase();
+      if (i > 0) doc.addPage();
+      doc.fontSize(16).fillColor('#000000').text(num + ' — ' + chLabel + (p.title ? ' — ' + p.title : ''));
+      doc.moveDown(0.5);
+      if (p.thumb) {
+        const buf = await fetchImageBuffer(p.thumb);
+        if (buf) {
+          try {
+            doc.image(buf, { fit: [500, 350] });
+            doc.moveDown(0.5);
+          } catch (e) { console.error('export/pdf image:', e.message); }
+        }
+      }
+      doc.fontSize(11).fillColor('#333333').text(p.content || '');
+    }
+    doc.end();
+  } catch (e) {
+    console.error('export/pdf:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/projects/:projectId/export/zip', requireAuth, requireProjectMember, async (req, res) => {

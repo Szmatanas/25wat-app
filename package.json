@@ -12,10 +12,13 @@
     "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
+    "docx": "^9.7.1",
     "express": "^4.18.2",
+    "image-size": "^2.0.2",
     "jsonwebtoken": "^9.0.3",
     "officeparser": "^7.6.2",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.19.1",
     "pg": "^8.23.0",
     "sharp": "^0.35.3"
   },
