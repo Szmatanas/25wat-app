@@ -8,6 +8,7 @@ import pg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { put } from '@vercel/blob';
+import archiver from 'archiver';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -477,6 +478,41 @@ app.post('/api/research/auto', async (req, res) => {
     }
     res.json({ results });
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/projects/:projectId/export/zip', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const { posts } = req.body;
+    if (!Array.isArray(posts) || !posts.length) return res.status(400).json({ error: 'Brak postow do eksportu' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.zip"');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', function(err) { console.error('archiver error:', err.message); });
+    archive.pipe(res);
+    for (let i = 0; i < posts.length; i++) {
+      const p = posts[i] || {};
+      const num = String(i + 1).padStart(2, '0');
+      const chLabel = (p.channel || 'fb').toUpperCase();
+      const safeTitle = (p.title || 'post').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'post';
+      const baseName = num + '_' + chLabel + '_' + safeTitle;
+      archive.append(p.content || '', { name: baseName + '.txt' });
+      if (p.thumb) {
+        try {
+          const imgResp = await fetch(p.thumb);
+          if (imgResp.ok) {
+            const buf = Buffer.from(await imgResp.arrayBuffer());
+            const ext = /\.jpe?g(\?|$)/i.test(p.thumb) ? 'jpg' : 'png';
+            archive.append(buf, { name: baseName + '.' + ext });
+          }
+        } catch (e) { console.error('export/zip image fetch:', e.message); }
+      }
+    }
+    await archive.finalize();
+  } catch (e) {
+    console.error('export/zip:', e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/design/upload-photo', async (req, res) => {
