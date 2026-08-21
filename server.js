@@ -24,6 +24,13 @@ const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
 const archiver = require('archiver');
 
+function stripEmoji(s) {
+  return (s || '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 async function fetchImageBuffer(url) {
   try {
     const r = await fetch(url);
@@ -547,13 +554,15 @@ app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMembe
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.pdf"');
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    doc.registerFont('Gilroy', path.join(__dirname, 'assets/fonts/Gilroy-Regular.otf'));
+    doc.registerFont('Gilroy-Bold', path.join(__dirname, 'assets/fonts/Gilroy-SemiBold.otf'));
     doc.pipe(res);
     for (let i = 0; i < posts.length; i++) {
       const p = posts[i] || {};
       const num = String(i + 1).padStart(2, '0');
       const chLabel = (p.channel || 'fb').toUpperCase();
       if (i > 0) doc.addPage();
-      doc.fontSize(16).fillColor('#000000').text(num + ' — ' + chLabel + (p.title ? ' — ' + p.title : ''));
+      doc.font('Gilroy-Bold').fontSize(16).fillColor('#000000').text(num + ' — ' + chLabel + (p.title ? ' — ' + stripEmoji(p.title) : ''));
       doc.moveDown(0.5);
       if (p.thumb) {
         const buf = await fetchImageBuffer(p.thumb);
@@ -564,7 +573,7 @@ app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMembe
           } catch (e) { console.error('export/pdf image:', e.message); }
         }
       }
-      doc.fontSize(11).fillColor('#333333').text(p.content || '');
+      doc.font('Gilroy').fontSize(11).fillColor('#333333').text(stripEmoji(p.content || ''));
     }
     doc.end();
   } catch (e) {
