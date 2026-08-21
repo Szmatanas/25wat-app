@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import pg from 'pg';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { put } from '@vercel/blob';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -18,6 +19,17 @@ app.use(cors({
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
+
+async function uploadImageToBlob(b64, ext) {
+  const buf = Buffer.from(b64, 'base64');
+  const filename = 'designs/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  const { url } = await put(filename, buf, {
+    access: 'public',
+    contentType: ext === 'png' ? 'image/png' : 'image/jpeg',
+    addRandomSuffix: false
+  });
+  return url;
+}
 const { parseOffice } = require('officeparser');
 app.use(express.json({ limit: '30mb' }));
 app.use((err, req, res, next) => {
@@ -490,7 +502,8 @@ app.post('/api/design/generate-photo', async (req, res) => {
     });
     const data = await r.json();
     if (data.data?.[0]?.b64_json) {
-      res.json({ url: 'data:image/png;base64,' + data.data[0].b64_json });
+      const url = await uploadImageToBlob(data.data[0].b64_json, 'png');
+      res.json({ url });
     } else {
       throw new Error(data.error?.message || 'Brak obrazu w odpowiedzi');
     }
@@ -752,8 +765,9 @@ Build the entire composition around this photo. Modify only the surrounding grap
     if (!imgCall || !imgCall.result) throw new Error('OpenAI nie zwrocil obrazu (brak image_generation_call w output)');
     const b64 = imgCall.result;
 
+    const uploadedImageUrl = await uploadImageToBlob(b64, 'png');
     res.json({
-      image: 'data:image/png;base64,' + b64,
+      image: uploadedImageUrl,
       prompt,
       referencesUsed: usingCustomRefs ? 'project-reference-designs' : references,
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
@@ -878,7 +892,7 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
       const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
       if (!imgCall || !imgCall.result) throw new Error(`OpenAI nie zwrocil obrazu dla slajdu ${i + 1}`);
       const b64 = imgCall.result;
-      const imageDataUrl = 'data:image/png;base64,' + b64;
+      const imageDataUrl = await uploadImageToBlob(b64, 'png');
 
       return { image: imageDataUrl, headline: slide.headline, subtext: slide.subtext || '' };
     }));
@@ -976,7 +990,8 @@ app.post('/api/design/generate-image-raw', async (req, res) => {
     const b64 = imgData.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI nie zwrocil obrazu');
 
-    res.json({ image: 'data:image/png;base64,' + b64, prompt, referencesUsed: FIXED_REFERENCES });
+    const uploadedRawUrl = await uploadImageToBlob(b64, 'png');
+    res.json({ image: uploadedRawUrl, prompt, referencesUsed: FIXED_REFERENCES });
   } catch(e) {
     console.error('generate-image-raw:', e.message);
     res.status(500).json({ error: e.message });
