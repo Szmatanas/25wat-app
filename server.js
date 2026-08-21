@@ -479,6 +479,21 @@ app.post('/api/research/auto', async (req, res) => {
   } catch(e) { console.error(e.message); res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/design/upload-photo', async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: 'Brak imageBase64' });
+    const match = /^data:image\/(png|jpe?g);base64,(.+)$/.exec(imageBase64);
+    if (!match) return res.status(400).json({ error: 'Nieprawidlowy format obrazu (oczekiwano data:image/png|jpeg;base64,...)' });
+    const ext = match[1] === 'jpg' ? 'jpeg' : match[1];
+    const url = await uploadImageToBlob(match[2], ext);
+    res.json({ url });
+  } catch(e) {
+    console.error('upload-photo:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/design/generate-photo', async (req, res) => {
   const { postTitle } = req.body;
   const hasDescription = !!(postTitle && postTitle.trim().length > 0);
