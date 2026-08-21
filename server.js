@@ -523,7 +523,10 @@ app.post('/api/projects/:projectId/export/word', requireAuth, requireProjectMemb
           } catch (e) { console.error('export/word image:', e.message); }
         }
       }
-      children.push(new Paragraph({ text: p.content || '' }));
+      const lines = (p.content || '').split('\n');
+      for (const line of lines) {
+        children.push(new Paragraph({ text: line }));
+      }
       if (i < posts.length - 1) children.push(new Paragraph({ children: [new PageBreak()] }));
     }
     const doc = new Document({ sections: [{ children }] });
