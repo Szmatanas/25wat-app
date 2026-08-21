@@ -19,8 +19,7 @@ app.use(cors({
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { PDFParse } = require('pdf-parse');
-const archiverModule = await import('archiver');
-const archiver = archiverModule.default || archiverModule;
+const archiver = require('archiver');
 
 async function uploadImageToBlob(b64, ext) {
   const buf = Buffer.from(b64, 'base64');
