@@ -916,17 +916,18 @@ app.post('/api/design/upload-photo', async (req, res) => {
 });
 
 app.post('/api/design/generate-photo', async (req, res) => {
-  const { postTitle } = req.body;
+  const { postTitle, projectId } = req.body;
   const hasDescription = !!(postTitle && postTitle.trim().length > 0);
   const prompt = hasDescription
     ? `Photorealistic editorial image, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the subject's appearance, setting and activity - the subject may be a person, an object, an animal, a creature, a mascot or anything else described below. Do not force a human figure, generic office attire or any specific ethnicity/appearance unless the description itself explicitly calls for it: ${postTitle}.`
     : `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Vary the person's ethnicity and appearance naturally and diversely across generations - do not default to any single ethnicity or appearance every time.`;
   try {
+    const OPENAI_KEY = await getOpenAiKey(projectId);
     const r = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + process.env.OPENAI_KEY
+        'Authorization': 'Bearer ' + OPENAI_KEY
       },
       body: JSON.stringify({
         model: 'gpt-image-1',
@@ -1218,9 +1219,9 @@ Build the entire composition around this photo. Modify only the surrounding grap
 });
 
 app.post('/api/design/generate-carousel', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, styleNote, format, slideCount } = req.body;
+  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, styleNote, format, slideCount, projectId } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
-  const OPENAI_KEY = process.env.OPENAI_KEY;
+  const OPENAI_KEY = await getOpenAiKey(projectId);
 
   const pairs = [
     { bg: '#171717', bgName: 'dark', text: '#F2EDE3', accent: '#7648F8', accentName: 'ultraviolet' },
@@ -1383,10 +1384,10 @@ Odpowiedz TYLKO JSON: {"action":"change_color|restyle|change_photo|change_headli
 });
 
 app.post('/api/design/generate-image-raw', async (req, res) => {
-  const { post, userPhoto } = req.body;
+  const { post, userPhoto, projectId } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   if (!userPhoto) return res.status(400).json({ error: 'Brak zdjecia (userPhoto)' });
-  const OPENAI_KEY = process.env.OPENAI_KEY;
+  const OPENAI_KEY = await getOpenAiKey(projectId);
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
 
   try {
