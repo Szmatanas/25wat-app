@@ -137,7 +137,49 @@ async function initDb() {
       PRIMARY KEY (project_id, key)
     );
   `);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_projects INTEGER;`);
+  await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS openai_api_key TEXT;`);
   console.log('DB schema ready');
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const result = await pool.query('SELECT role FROM users WHERE id = $1', [req.userId]);
+    if (!result.rows.length || result.rows[0].role !== 'admin') {
+      return res.status(403).json({ error: 'Wymagane uprawnienia administratora' });
+    }
+    next();
+  } catch (e) {
+    console.error('requireAdmin:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+async function requireProjectOwnerOrAdmin(req, res, next) {
+  try {
+    const userResult = await pool.query('SELECT role FROM users WHERE id = $1', [req.userId]);
+    const isGlobalAdmin = userResult.rows.length && userResult.rows[0].role === 'admin';
+    if (isGlobalAdmin) return next();
+    if (req.projectRole === 'owner') return next();
+    return res.status(403).json({ error: 'Tylko wlasciciel projektu lub administrator' });
+  } catch (e) {
+    console.error('requireProjectOwnerOrAdmin:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+async function getOpenAiKey(projectId) {
+  if (projectId) {
+    try {
+      const r = await pool.query('SELECT openai_api_key FROM projects WHERE id = $1', [projectId]);
+      const key = r.rows[0] && r.rows[0].openai_api_key;
+      if (key) return key;
+    } catch (e) {
+      console.error('getOpenAiKey:', e.message);
+    }
+  }
+  return process.env.OPENAI_KEY;
 }
 
 async function requireProjectMember(req, res, next) {
@@ -200,13 +242,13 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Brak email/hasla' });
   try {
-    const result = await pool.query('SELECT id, email, name, password_hash FROM users WHERE email = $1', [email.toLowerCase()]);
+    const result = await pool.query('SELECT id, email, name, password_hash, role FROM users WHERE email = $1', [email.toLowerCase()]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Nieprawidlowy email lub haslo' });
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Nieprawidlowy email lub haslo' });
     const token = signToken(user);
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
   } catch (e) {
     console.error('login:', e.message);
     res.status(500).json({ error: e.message });
@@ -215,7 +257,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   try {
-    const userResult = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [req.userId]);
+    const userResult = await pool.query('SELECT id, email, name, role, max_projects FROM users WHERE id = $1', [req.userId]);
     const user = userResult.rows[0];
     if (!user) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
     const projectsResult = await pool.query(
@@ -236,6 +278,15 @@ app.post('/api/projects', requireAuth, async (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Brak nazwy projektu' });
   try {
+    const userResult = await pool.query('SELECT role, max_projects FROM users WHERE id = $1', [req.userId]);
+    const currentUser = userResult.rows[0];
+    if (currentUser && currentUser.role !== 'admin' && currentUser.max_projects != null) {
+      const countResult = await pool.query('SELECT COUNT(*) FROM project_members WHERE user_id = $1', [req.userId]);
+      const currentCount = parseInt(countResult.rows[0].count, 10);
+      if (currentCount >= currentUser.max_projects) {
+        return res.status(403).json({ error: `Osiagnieto limit projektow (${currentUser.max_projects}). Popros administratora o zwiekszenie limitu.` });
+      }
+    }
     const projectResult = await pool.query(
       'INSERT INTO projects (name, created_by) VALUES ($1, $2) RETURNING id, name',
       [name, req.userId]
@@ -264,6 +315,134 @@ app.get('/api/projects', requireAuth, async (req, res) => {
     res.json({ projects: result.rows });
   } catch (e) {
     console.error('list projects:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Admin: zarzadzanie userami (rola, limit projektow) ---
+app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.id, u.email, u.name, u.role, u.max_projects,
+              (SELECT COUNT(*) FROM project_members pm WHERE pm.user_id = u.id) AS project_count
+       FROM users u ORDER BY u.created_at ASC`
+    );
+    res.json({ users: result.rows });
+  } catch (e) {
+    console.error('admin list users:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const { role, maxProjects } = req.body;
+  if (!userId) return res.status(400).json({ error: 'Nieprawidlowy userId' });
+  if (role && role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Nieprawidlowa rola' });
+  try {
+    const fields = [];
+    const values = [];
+    let i = 1;
+    if (role) { fields.push(`role = $${i++}`); values.push(role); }
+    if (maxProjects !== undefined) { fields.push(`max_projects = $${i++}`); values.push(maxProjects === null ? null : parseInt(maxProjects, 10)); }
+    if (!fields.length) return res.status(400).json({ error: 'Brak pol do aktualizacji' });
+    values.push(userId);
+    const result = await pool.query(
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, email, name, role, max_projects`,
+      values
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
+    res.json({ user: result.rows[0] });
+  } catch (e) {
+    console.error('admin update user:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Czlonkowie projektu ---
+app.get('/api/projects/:projectId/members', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.id, u.email, u.name, pm.role FROM project_members pm
+       JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id = $1 ORDER BY pm.created_at ASC`,
+      [req.projectId]
+    );
+    res.json({ members: result.rows });
+  } catch (e) {
+    console.error('list members:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/projects/:projectId/members', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Brak email' });
+  try {
+    const userResult = await pool.query('SELECT id, role, max_projects FROM users WHERE email = $1', [email.toLowerCase()]);
+    const targetUser = userResult.rows[0];
+    if (!targetUser) return res.status(404).json({ error: 'Nie znaleziono uzytkownika o tym emailu (musi miec juz konto)' });
+    if (targetUser.role !== 'admin' && targetUser.max_projects != null) {
+      const countResult = await pool.query('SELECT COUNT(*) FROM project_members WHERE user_id = $1', [targetUser.id]);
+      const currentCount = parseInt(countResult.rows[0].count, 10);
+      if (currentCount >= targetUser.max_projects) {
+        return res.status(403).json({ error: `Ten uzytkownik osiagnal limit projektow (${targetUser.max_projects})` });
+      }
+    }
+    await pool.query(
+      'INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (project_id, user_id) DO NOTHING',
+      [req.projectId, targetUser.id, 'member']
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('add member:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/projects/:projectId/members/:userId', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+  const targetUserId = parseInt(req.params.userId, 10);
+  try {
+    const ownerCountResult = await pool.query(
+      `SELECT COUNT(*) FROM project_members WHERE project_id = $1 AND role = 'owner'`,
+      [req.projectId]
+    );
+    const targetRoleResult = await pool.query(
+      'SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [req.projectId, targetUserId]
+    );
+    const targetRole = targetRoleResult.rows[0] && targetRoleResult.rows[0].role;
+    if (targetRole === 'owner' && parseInt(ownerCountResult.rows[0].count, 10) <= 1) {
+      return res.status(400).json({ error: 'Nie mozna usunac jedynego wlasciciela projektu' });
+    }
+    await pool.query('DELETE FROM project_members WHERE project_id = $1 AND user_id = $2', [req.projectId, targetUserId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('remove member:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Ustawienia projektu: klucz OpenAI klienta ---
+app.get('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT openai_api_key FROM projects WHERE id = $1', [req.projectId]);
+    const key = result.rows[0] && result.rows[0].openai_api_key;
+    const masked = key ? key.slice(0, 3) + '...' + key.slice(-4) : null;
+    res.json({ hasOpenAiKey: !!key, maskedKey: masked });
+  } catch (e) {
+    console.error('get project settings:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+  const { openaiApiKey } = req.body;
+  try {
+    await pool.query('UPDATE projects SET openai_api_key = $1 WHERE id = $2', [openaiApiKey || null, req.projectId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('update project settings:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -840,7 +1019,7 @@ const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 app.post('/api/design/generate-image', async (req, res) => {
   const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
-  const OPENAI_KEY = process.env.OPENAI_KEY;
+  const OPENAI_KEY = await getOpenAiKey(projectId);
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
 
   const pairs = [
