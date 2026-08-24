@@ -625,15 +625,16 @@ app.post('/api/projects/:projectId/export/zip', requireAuth, requireProjectMembe
       const chLabel = (p.channel || 'fb').toUpperCase();
       const safeTitle = (p.title || 'post').toLowerCase()
         .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'post';
-      const baseName = num + '_' + chLabel + '_' + safeTitle;
-      archive.append(p.content || '', { name: baseName + '.txt' });
+      const folderName = num + '_' + chLabel + '_' + safeTitle;
+      archive.append(p.content || '', { name: folderName + '/tekst.txt' });
       if (p.thumb) {
         try {
           const imgResp = await fetch(p.thumb);
           if (imgResp.ok) {
-            const buf = Buffer.from(await imgResp.arrayBuffer());
+            let buf = Buffer.from(await imgResp.arrayBuffer());
+            if (p.aiLabelEnabled) buf = await applyAiBadge(buf);
             const ext = /\.jpe?g(\?|$)/i.test(p.thumb) ? 'jpg' : 'png';
-            archive.append(buf, { name: baseName + '.' + ext });
+            archive.append(buf, { name: folderName + '/grafika.' + ext });
           }
         } catch (e) { console.error('export/zip image fetch:', e.message); }
       }
