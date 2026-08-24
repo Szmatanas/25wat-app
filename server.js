@@ -32,25 +32,22 @@ function stripEmoji(s) {
     .trim();
 }
 
-function aiBadgeSvg(size) {
-  return Buffer.from(
-    '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
-    '<circle cx="12" cy="12" r="12" fill="black" fill-opacity="0.72"/>' +
-    '<path d="M12 4 L14 10 L20 12 L14 14 L12 20 L10 14 L4 12 L10 10 Z" fill="white"/>' +
-    '</svg>'
-  );
-}
+const AI_BADGE_FILES = { ai: 'badge-ai.png', ai_generated: 'badge-ai-generated.png', ai_modified: 'badge-ai-modified.png' };
 
-async function applyAiBadge(buf) {
+async function applyAiBadge(buf, variant) {
   try {
+    if (!variant || !AI_BADGE_FILES[variant]) return buf;
     const img = sharp(buf);
     const meta = await img.metadata();
     const w = meta.width || 800;
     const h = meta.height || 800;
-    const badgeSize = Math.max(16, Math.round(w * 0.035));
+    const badgeWidth = Math.max(40, Math.round(w * 0.22));
     const margin = Math.max(6, Math.round(w * 0.025));
-    const badgeSvg = aiBadgeSvg(badgeSize);
-    return await img.composite([{ input: badgeSvg, left: w - badgeSize - margin, top: h - badgeSize - margin }]).toBuffer();
+    const badgePath = path.join(__dirname, 'assets', 'badges', AI_BADGE_FILES[variant]);
+    const badgeBuf = await sharp(badgePath).resize({ width: badgeWidth }).toBuffer();
+    const badgeMeta = await sharp(badgeBuf).metadata();
+    const badgeHeight = badgeMeta.height || badgeWidth;
+    return await img.composite([{ input: badgeBuf, left: w - badgeWidth - margin, top: h - badgeHeight - margin }]).toBuffer();
   } catch (e) {
     console.error('applyAiBadge:', e.message);
     return buf;
@@ -542,7 +539,7 @@ app.post('/api/projects/:projectId/export/word', requireAuth, requireProjectMemb
       }));
       if (p.thumb) {
         let buf = await fetchImageBuffer(p.thumb);
-        if (buf && p.aiLabelEnabled) buf = await applyAiBadge(buf);
+        if (buf && p.aiLabelVariant) buf = await applyAiBadge(buf, p.aiLabelVariant);
         if (buf) {
           try {
             const dim = imageSize(buf);
@@ -593,7 +590,7 @@ app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMembe
       doc.moveDown(0.5);
       if (p.thumb) {
         let buf = await fetchImageBuffer(p.thumb);
-        if (buf && p.aiLabelEnabled) buf = await applyAiBadge(buf);
+        if (buf && p.aiLabelVariant) buf = await applyAiBadge(buf, p.aiLabelVariant);
         if (buf) {
           try {
             doc.image(buf, { fit: [500, 350] });
@@ -632,7 +629,7 @@ app.post('/api/projects/:projectId/export/zip', requireAuth, requireProjectMembe
           const imgResp = await fetch(p.thumb);
           if (imgResp.ok) {
             let buf = Buffer.from(await imgResp.arrayBuffer());
-            if (p.aiLabelEnabled) buf = await applyAiBadge(buf);
+            if (p.aiLabelVariant) buf = await applyAiBadge(buf, p.aiLabelVariant);
             const ext = /\.jpe?g(\?|$)/i.test(p.thumb) ? 'jpg' : 'png';
             archive.append(buf, { name: folderName + '/grafika.' + ext });
           }
