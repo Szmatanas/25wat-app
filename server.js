@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import { put } from '@vercel/blob';
 import { Document, Packer, Paragraph, HeadingLevel, ImageRun, PageBreak } from 'docx';
 import PDFDocument from 'pdfkit';
+import sharp from 'sharp';
 import { imageSize } from 'image-size';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,31 @@ function stripEmoji(s) {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
     .replace(/ {2,}/g, ' ')
     .trim();
+}
+
+function aiBadgeSvg(size) {
+  return Buffer.from(
+    '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
+    '<circle cx="12" cy="12" r="12" fill="black" fill-opacity="0.72"/>' +
+    '<path d="M12 4 L14 10 L20 12 L14 14 L12 20 L10 14 L4 12 L10 10 Z" fill="white"/>' +
+    '</svg>'
+  );
+}
+
+async function applyAiBadge(buf) {
+  try {
+    const img = sharp(buf);
+    const meta = await img.metadata();
+    const w = meta.width || 800;
+    const h = meta.height || 800;
+    const badgeSize = Math.max(16, Math.round(w * 0.035));
+    const margin = Math.max(6, Math.round(w * 0.025));
+    const badgeSvg = aiBadgeSvg(badgeSize);
+    return await img.composite([{ input: badgeSvg, left: w - badgeSize - margin, top: h - badgeSize - margin }]).toBuffer();
+  } catch (e) {
+    console.error('applyAiBadge:', e.message);
+    return buf;
+  }
 }
 
 async function fetchImageBuffer(url) {
@@ -515,7 +541,8 @@ app.post('/api/projects/:projectId/export/word', requireAuth, requireProjectMemb
         text: num + ' — ' + chLabel + (p.title ? ' — ' + p.title : '')
       }));
       if (p.thumb) {
-        const buf = await fetchImageBuffer(p.thumb);
+        let buf = await fetchImageBuffer(p.thumb);
+        if (buf && p.aiLabelEnabled) buf = await applyAiBadge(buf);
         if (buf) {
           try {
             const dim = imageSize(buf);
@@ -565,7 +592,8 @@ app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMembe
       doc.font('Gilroy-Bold').fontSize(16).fillColor('#000000').text(num + ' — ' + chLabel + (p.title ? ' — ' + stripEmoji(p.title) : ''));
       doc.moveDown(0.5);
       if (p.thumb) {
-        const buf = await fetchImageBuffer(p.thumb);
+        let buf = await fetchImageBuffer(p.thumb);
+        if (buf && p.aiLabelEnabled) buf = await applyAiBadge(buf);
         if (buf) {
           try {
             doc.image(buf, { fit: [500, 350] });
