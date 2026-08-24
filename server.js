@@ -139,6 +139,7 @@ async function initDb() {
   `);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_projects INTEGER;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_own_openai_key BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS openai_api_key TEXT;`);
   console.log('DB schema ready');
@@ -228,6 +229,10 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     req.userId = payload.userId;
+    const activeResult = await pool.query('SELECT is_active FROM users WHERE id = $1', [req.userId]);
+    if (!activeResult.rows.length || activeResult.rows[0].is_active === false) {
+      return res.status(403).json({ error: 'To konto zostalo dezaktywowane' });
+    }
     next();
   } catch (e) {
     return res.status(401).json({ error: 'Nieprawidlowy lub wygasly token' });
@@ -258,11 +263,12 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Brak email/hasla' });
   try {
-    const result = await pool.query('SELECT id, email, name, password_hash, role FROM users WHERE email = $1', [email.toLowerCase()]);
+    const result = await pool.query('SELECT id, email, name, password_hash, role, is_active FROM users WHERE email = $1', [email.toLowerCase()]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Nieprawidlowy email lub haslo' });
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Nieprawidlowy email lub haslo' });
+    if (!user.is_active) return res.status(403).json({ error: 'To konto zostalo dezaktywowane. Skontaktuj sie z administratorem.' });
     const token = signToken(user);
     res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
   } catch (e) {
@@ -339,7 +345,7 @@ app.get('/api/projects', requireAuth, async (req, res) => {
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.name, u.role, u.max_projects, u.can_use_own_openai_key,
+      `SELECT u.id, u.email, u.name, u.role, u.max_projects, u.can_use_own_openai_key, u.is_active,
               (SELECT COUNT(*) FROM project_members pm WHERE pm.user_id = u.id) AS project_count
        FROM users u ORDER BY u.created_at ASC`
     );
@@ -372,20 +378,31 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
-  const { role, maxProjects, canUseOwnKey } = req.body;
+  const { role, maxProjects, canUseOwnKey, isActive } = req.body;
   if (!userId) return res.status(400).json({ error: 'Nieprawidlowy userId' });
   if (role && role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Nieprawidlowa rola' });
+  if (isActive === false && userId === req.userId) return res.status(400).json({ error: 'Nie mozesz dezaktywowac wlasnego konta' });
   try {
+    if (isActive === false && role !== 'member') {
+      const targetRoleResult = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+      if (targetRoleResult.rows[0] && targetRoleResult.rows[0].role === 'admin') {
+        const adminCountResult = await pool.query(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = true`);
+        if (parseInt(adminCountResult.rows[0].count, 10) <= 1) {
+          return res.status(400).json({ error: 'Nie mozna dezaktywowac jedynego aktywnego administratora' });
+        }
+      }
+    }
     const fields = [];
     const values = [];
     let i = 1;
     if (role) { fields.push(`role = $${i++}`); values.push(role); }
     if (maxProjects !== undefined) { fields.push(`max_projects = $${i++}`); values.push(maxProjects === null ? null : parseInt(maxProjects, 10)); }
     if (canUseOwnKey !== undefined) { fields.push(`can_use_own_openai_key = $${i++}`); values.push(!!canUseOwnKey); }
+    if (isActive !== undefined) { fields.push(`is_active = $${i++}`); values.push(!!isActive); }
     if (!fields.length) return res.status(400).json({ error: 'Brak pol do aktualizacji' });
     values.push(userId);
     const result = await pool.query(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, email, name, role, max_projects, can_use_own_openai_key`,
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, email, name, role, max_projects, can_use_own_openai_key, is_active`,
       values
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
@@ -409,6 +426,7 @@ app.delete('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, re
         return res.status(400).json({ error: 'Nie mozna usunac jedynego administratora' });
       }
     }
+    await pool.query('UPDATE projects SET created_by = NULL WHERE created_by = $1', [userId]);
     await pool.query('DELETE FROM users WHERE id = $1', [userId]);
     res.json({ ok: true });
   } catch (e) {
