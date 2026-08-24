@@ -1,4 +1,3 @@
-import sharp from 'sharp';
 import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
