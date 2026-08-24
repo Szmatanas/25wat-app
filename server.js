@@ -40,7 +40,7 @@ async function applyAiBadge(buf, variant) {
     const meta = await img.metadata();
     const w = meta.width || 800;
     const h = meta.height || 800;
-    const badgeWidth = Math.max(40, Math.round(w * 0.22));
+    const badgeWidth = Math.max(40, Math.round(w * 0.13));
     const margin = Math.max(6, Math.round(w * 0.025));
     const badgePath = path.join(__dirname, 'assets', 'badges', AI_BADGE_FILES[variant]);
     const badgeBuf = await sharp(badgePath).resize({ width: badgeWidth }).toBuffer();
