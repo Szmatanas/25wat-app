@@ -334,6 +334,26 @@ app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
+  const { email, password, name, role, maxProjects } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Brak email/hasla' });
+  if (password.length < 6) return res.status(400).json({ error: 'Haslo musi miec co najmniej 6 znakow' });
+  if (role && role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Nieprawidlowa rola' });
+  try {
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length) return res.status(409).json({ error: 'Ten email jest juz zarejestrowany' });
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (email, password_hash, name, role, max_projects) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, max_projects',
+      [email.toLowerCase(), hash, name || null, role || 'member', maxProjects === undefined || maxProjects === null || maxProjects === '' ? null : parseInt(maxProjects, 10)]
+    );
+    res.json({ user: result.rows[0] });
+  } catch (e) {
+    console.error('admin create user:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   const { role, maxProjects } = req.body;
