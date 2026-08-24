@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors({
   origin: ['https://aisomeboost.vercel.app', 'https://aisomeboost.netlify.app', 'http://localhost:3000', 'http://localhost:5500'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   credentials: false
 }));
 import { createRequire } from 'module';
@@ -375,6 +375,27 @@ app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res
     res.json({ user: result.rows[0] });
   } catch (e) {
     console.error('admin update user:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  if (!userId) return res.status(400).json({ error: 'Nieprawidlowy userId' });
+  if (userId === req.userId) return res.status(400).json({ error: 'Nie mozesz usunac wlasnego konta' });
+  try {
+    const targetResult = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (!targetResult.rows.length) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
+    if (targetResult.rows[0].role === 'admin') {
+      const adminCountResult = await pool.query(`SELECT COUNT(*) FROM users WHERE role = 'admin'`);
+      if (parseInt(adminCountResult.rows[0].count, 10) <= 1) {
+        return res.status(400).json({ error: 'Nie mozna usunac jedynego administratora' });
+      }
+    }
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('admin delete user:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
