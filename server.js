@@ -139,6 +139,7 @@ async function initDb() {
   `);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_projects INTEGER;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_own_openai_key BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS openai_api_key TEXT;`);
   console.log('DB schema ready');
 }
@@ -165,6 +166,21 @@ async function requireProjectOwnerOrAdmin(req, res, next) {
     return res.status(403).json({ error: 'Tylko wlasciciel projektu lub administrator' });
   } catch (e) {
     console.error('requireProjectOwnerOrAdmin:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+async function requireProjectSettingsAccess(req, res, next) {
+  try {
+    const userResult = await pool.query('SELECT role, can_use_own_openai_key FROM users WHERE id = $1', [req.userId]);
+    const u = userResult.rows[0];
+    const isGlobalAdmin = u && u.role === 'admin';
+    if (isGlobalAdmin) return next();
+    if (req.projectRole === 'owner') return next();
+    if (u && u.can_use_own_openai_key) return next();
+    return res.status(403).json({ error: 'Brak dostepu do ustawien projektu' });
+  } catch (e) {
+    console.error('requireProjectSettingsAccess:', e.message);
     res.status(500).json({ error: e.message });
   }
 }
@@ -257,7 +273,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   try {
-    const userResult = await pool.query('SELECT id, email, name, role, max_projects FROM users WHERE id = $1', [req.userId]);
+    const userResult = await pool.query('SELECT id, email, name, role, max_projects, can_use_own_openai_key FROM users WHERE id = $1', [req.userId]);
     const user = userResult.rows[0];
     if (!user) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
     const projectsResult = await pool.query(
@@ -323,7 +339,7 @@ app.get('/api/projects', requireAuth, async (req, res) => {
 app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.name, u.role, u.max_projects,
+      `SELECT u.id, u.email, u.name, u.role, u.max_projects, u.can_use_own_openai_key,
               (SELECT COUNT(*) FROM project_members pm WHERE pm.user_id = u.id) AS project_count
        FROM users u ORDER BY u.created_at ASC`
     );
@@ -335,7 +351,7 @@ app.get('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
-  const { email, password, name, role, maxProjects } = req.body;
+  const { email, password, name, role, maxProjects, canUseOwnKey } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Brak email/hasla' });
   if (password.length < 6) return res.status(400).json({ error: 'Haslo musi miec co najmniej 6 znakow' });
   if (role && role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Nieprawidlowa rola' });
@@ -344,8 +360,8 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
     if (existing.rows.length) return res.status(409).json({ error: 'Ten email jest juz zarejestrowany' });
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (email, password_hash, name, role, max_projects) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, max_projects',
-      [email.toLowerCase(), hash, name || null, role || 'member', maxProjects === undefined || maxProjects === null || maxProjects === '' ? null : parseInt(maxProjects, 10)]
+      'INSERT INTO users (email, password_hash, name, role, max_projects, can_use_own_openai_key) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, name, role, max_projects, can_use_own_openai_key',
+      [email.toLowerCase(), hash, name || null, role || 'member', maxProjects === undefined || maxProjects === null || maxProjects === '' ? null : parseInt(maxProjects, 10), !!canUseOwnKey]
     );
     res.json({ user: result.rows[0] });
   } catch (e) {
@@ -356,7 +372,7 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
-  const { role, maxProjects } = req.body;
+  const { role, maxProjects, canUseOwnKey } = req.body;
   if (!userId) return res.status(400).json({ error: 'Nieprawidlowy userId' });
   if (role && role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Nieprawidlowa rola' });
   try {
@@ -365,10 +381,11 @@ app.patch('/api/admin/users/:userId', requireAuth, requireAdmin, async (req, res
     let i = 1;
     if (role) { fields.push(`role = $${i++}`); values.push(role); }
     if (maxProjects !== undefined) { fields.push(`max_projects = $${i++}`); values.push(maxProjects === null ? null : parseInt(maxProjects, 10)); }
+    if (canUseOwnKey !== undefined) { fields.push(`can_use_own_openai_key = $${i++}`); values.push(!!canUseOwnKey); }
     if (!fields.length) return res.status(400).json({ error: 'Brak pol do aktualizacji' });
     values.push(userId);
     const result = await pool.query(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, email, name, role, max_projects`,
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING id, email, name, role, max_projects, can_use_own_openai_key`,
       values
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Uzytkownik nie istnieje' });
@@ -465,19 +482,22 @@ app.delete('/api/projects/:projectId/members/:userId', requireAuth, requireProje
 });
 
 // --- Ustawienia projektu: klucz OpenAI klienta ---
-app.get('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+app.get('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectSettingsAccess, async (req, res) => {
   try {
     const result = await pool.query('SELECT openai_api_key FROM projects WHERE id = $1', [req.projectId]);
     const key = result.rows[0] && result.rows[0].openai_api_key;
     const masked = key ? key.slice(0, 3) + '...' + key.slice(-4) : null;
-    res.json({ hasOpenAiKey: !!key, maskedKey: masked });
+    const userResult = await pool.query('SELECT role FROM users WHERE id = $1', [req.userId]);
+    const isGlobalAdmin = userResult.rows.length && userResult.rows[0].role === 'admin';
+    const canManageMembers = isGlobalAdmin || req.projectRole === 'owner';
+    res.json({ hasOpenAiKey: !!key, maskedKey: masked, canManageMembers });
   } catch (e) {
     console.error('get project settings:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.patch('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectOwnerOrAdmin, async (req, res) => {
+app.patch('/api/projects/:projectId/settings', requireAuth, requireProjectMember, requireProjectSettingsAccess, async (req, res) => {
   const { openaiApiKey } = req.body;
   try {
     await pool.query('UPDATE projects SET openai_api_key = $1 WHERE id = $2', [openaiApiKey || null, req.projectId]);
