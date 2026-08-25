@@ -1505,7 +1505,10 @@ async function getProjectCompetitors(projectId) {
           if (url) {
             try { domain = new URL(/^https?:\/\//.test(url) ? url : ('https://' + url)).hostname.replace(/^www\./, ''); } catch (e) {}
           }
-          return { name, query: name + ' social media content 2026', domains: domain ? [domain, 'linkedin.com'] : undefined };
+          const query = domain
+            ? name + ' social media content 2026'
+            : '"' + name + '" (firma OR spolka OR marka OR company) social media content 2026';
+          return { name, query, domains: domain ? [domain, 'linkedin.com'] : undefined };
         });
       }
     }
