@@ -1358,7 +1358,26 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
 });
 
 app.post('/api/design/account-action', async (req, res) => {
-  const { message, post, colorPairIdx, hasPhoto, history } = req.body;
+  const { message, post, colorPairIdx, hasPhoto, history, projectId } = req.body;
+  const DEFAULT_ACCOUNT_PAIRS = [
+    { bg: '#171717', bgName: 'ciemne', text: '#F2EDE3', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#171717', bgName: 'ciemne', text: '#F2EDE3', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#F2EDE3', bgName: 'jasne/bezowe', text: '#171717', accent: '#D0F200', accentName: 'neon lime' },
+    { bg: '#F2EDE3', bgName: 'jasne/bezowe', text: '#171717', accent: '#7648F8', accentName: 'ultraviolet' },
+    { bg: '#D0F200', bgName: 'neonowe', text: '#171717', accent: '#171717', accentName: 'dark' }
+  ];
+  let accountColorPairs = DEFAULT_ACCOUNT_PAIRS;
+  try {
+    const designAssetsForColors = await getProjectDesignAssets(projectId);
+    if (designAssetsForColors && designAssetsForColors.colorPairs && designAssetsForColors.colorPairs.length) {
+      accountColorPairs = designAssetsForColors.colorPairs;
+    }
+  } catch (e) {
+    console.error('account-action colorPairs lookup:', e.message);
+  }
+  const colorPairsText = accountColorPairs.map((p, i) =>
+    i + ': tlo ' + (p.bgName || p.bg) + ' ' + p.bg + ', tekst ' + p.text + ', akcent ' + (p.accentName || p.accent) + ' ' + p.accent
+  ).join('\n');
   const sys = `Jestes Account Managerem w agencji 25wat. Klient napisal chaotyczna, potocznie sformulowana uwage o designie posta, ktory wlasnie zostal wygenerowany. Twoim zadaniem jest zdecydowac JAKA AKCJE wykonac - nie realizuj jej samemu, tylko sklasyfikuj.
 
 Dostepne akcje:
@@ -1369,14 +1388,10 @@ Dostepne akcje:
 - "edit_copy": klient chce zmienic tresc POSTA (podpis pod grafika), nie tekst na samej grafice
 - "clarify": NIE jest jasne o co konkretnie chodzi - zadaj JEDNO precyzyjne pytanie dopytujace, NIE zgaduj
 
-Dostepne pary kolorow (indeks: tlo / tekst / akcent) - UZYWAJ TYCH FAKTYCZNYCH KOLOROW zeby wybrac targetColorPairIdx, nie zgaduj numeru:
-0: tlo ciemne #171717, tekst jasny #F2EDE3, akcent ultraviolet #7648F8
-1: tlo ciemne #171717, tekst jasny #F2EDE3, akcent neon lime #D0F200
-2: tlo jasne/bezowe #F2EDE3, tekst ciemny #171717, akcent neon lime #D0F200
-3: tlo jasne/bezowe #F2EDE3, tekst ciemny #171717, akcent ultraviolet #7648F8
-4: tlo neonowe #D0F200, tekst ciemny #171717, bez osobnego akcentu
+Dostepne pary kolorow DLA TEGO KONKRETNEGO PROJEKTU (indeks: tlo / tekst / akcent) - UZYWAJ TYCH FAKTYCZNYCH KOLOROW zeby wybrac targetColorPairIdx, nie zgaduj numeru, nie mylia z inna marka:
+${colorPairsText}
 
-Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? colorPairIdx : 'nieznana'} (0-4), post ${hasPhoto ? 'ZE zdjeciem' : 'BEZ zdjecia'}.
+Aktualne ustawienia: para kolorow numer ${typeof colorPairIdx === 'number' ? colorPairIdx : 'nieznana'} (0-${accountColorPairs.length - 1}), post ${hasPhoto ? 'ZE zdjeciem' : 'BEZ zdjecia'}.
 
 KRYTYCZNA ZASADA: jesli ponizej w historii rozmowy widac, ze juz wczesniej zadales pytanie typu clarify na ten sam temat i klient odpowiedzial (nawet ogolnikowo, nawet "po prostu wykonaj") - NIE WOLNO Ci zwrocic clarify drugi raz z rzedu na ten sam temat. Zamiast tego podejmij najlepsza mozliwa decyzje na podstawie calej rozmowy i wykonaj akcje. Maksymalnie JEDNO dopytanie na dany temat, potem dzialaj.
 
