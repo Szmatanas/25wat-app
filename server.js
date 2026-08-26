@@ -1185,7 +1185,9 @@ Do not reinterpret, beautify, stylize, redraw or replace the person. Do not gene
 
 The person must be indistinguishable from the supplied photograph.
 
-Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjecia i bez osoby.';
+Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.${usingCustomRefs ? `
+
+IMPORTANT: any people, faces, or human figures visible in the OTHER reference images attached earlier (before this last photo) are completely irrelevant to this task - those images are used ONLY as style/layout/typography/color references. Ignore any face or identity shown in them entirely. Do not blend, merge, average, or borrow any facial feature, skin tone, hairstyle or expression from them. The ONLY identity that matters anywhere in this composition is the person in the LAST attached photo.` : ''}` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjecia i bez osoby.';
 
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
 
