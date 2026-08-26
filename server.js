@@ -197,6 +197,19 @@ async function resolveUserPhotoBase64(userPhoto) {
   return userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
 }
 
+async function getProjectFilenameSlug(projectId) {
+  try {
+    if (projectId) {
+      const r = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+      const name = r.rows[0] && r.rows[0].name;
+      if (name) return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || '25wat';
+    }
+  } catch (e) {
+    console.error('getProjectFilenameSlug:', e.message);
+  }
+  return '25wat';
+}
+
 async function getOpenAiKey(projectId) {
   if (projectId) {
     try {
@@ -760,6 +773,10 @@ app.post('/api/research/auto', async (req, res) => {
     const now = new Date();
     const monthsPl = ['styczen','luty','marzec','kwiecien','maj','czerwiec','lipiec','sierpien','wrzesien','pazdziernik','listopad','grudzien'];
     const dateLabel = monthsPl[now.getMonth()] + ' ' + now.getFullYear();
+    const clientFacts = await getClientFacts(projectId, dateLabel);
+    const clientFactsBlock = clientFacts
+      ? 'FAKTY O KLIENCIE (z jego wlasnej strony/LinkedIn - to zrodlo prawdy, NIE wymyslaj nic co temu przeczy albo wykracza poza te dane):\n' + clientFacts + '\n\n---\n\n'
+      : '';
     const activeCompetitors = await getProjectCompetitors(projectId);
     if (!activeCompetitors.length) {
       results.push({ type: 'competitors_missing', checkedAt: dateLabel });
@@ -769,8 +786,8 @@ app.post('/api/research/auto', async (req, res) => {
         if (!ctx || ctx.trim().length < 30) {
           return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
         }
-        const sys = 'Jestes analitykiem opisujacym konkurencje. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla klienta - max 8 slow","threat_level":"low|medium|high"}';
-        return { name: c.name, analysis: await claude(sys, ctx), sources, checkedAt: dateLabel };
+        const sys = 'Jestes analitykiem opisujacym konkurencje. Opisz krotko co konkurent "' + c.name + '" komunikuje teraz. Jesli podane sa ponizej fakty o kliencie, "opportunity" musi byc realistyczna wzgledem tego co klient faktycznie robi/oferuje - nie wymyslaj. Odpowiedz TYLKO JSON po polsku, max 10 slow na pole, bez em-dash: {"message":"co promuje/komunikuje teraz - max 10 slow","topic":"temat - max 4 slowa","opportunity":"szansa dla klienta - max 8 slow","threat_level":"low|medium|high"}';
+        return { name: c.name, analysis: await claude(sys, clientFactsBlock + ctx), sources, checkedAt: dateLabel };
       }));
       comp.forEach(r => { if (r.status === 'fulfilled') results.push({ type: 'competitor', ...r.value }); });
     }
@@ -781,8 +798,8 @@ app.post('/api/research/auto', async (req, res) => {
       try {
         const trendsQuery = activeTrendsFocus.slice(0, 200);
         const { text: tCtx, sources: trendSources } = await tavilySearchFull(trendsQuery + ' ' + dateLabel, TREND_PORTALS);
-        const tSys = 'Jestes analitykiem content. Trendy: ' + trendsQuery + ' teraz. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
-        results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, tCtx), sources: trendSources, checkedAt: dateLabel });
+        const tSys = 'Jestes analitykiem content. Trendy: ' + trendsQuery + ' teraz. Jesli podane sa fakty o kliencie, dopasuj "action" do tego co klient faktycznie robi/oferuje - nie wymyslaj. Odpowiedz TYLKO JSON po polsku, bez em-dash: {"hot_topics":["temat 1 - max 8 slow","temat 2","temat 3","temat 4"],"content_angles":["kat 1 - max 8 slow","kat 2","kat 3"],"action":"napisz post o: max 10 slow"}';
+        results.push({ type: 'trends', name: 'Trendy', analysis: await claude(tSys, clientFactsBlock + tCtx), sources: trendSources, checkedAt: dateLabel });
       } catch (e) {
         console.error('trends search failed:', e.message);
         results.push({ type: 'trends_error', name: 'Trendy', error: e.message, checkedAt: dateLabel });
@@ -831,7 +848,7 @@ app.post('/api/projects/:projectId/export/word', requireAuth, requireProjectMemb
     const doc = new Document({ sections: [{ children }] });
     const buffer = await Packer.toBuffer(doc);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.docx"');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + (await getProjectFilenameSlug(req.projectId)) + '-eksport.docx"');
     res.send(buffer);
   } catch (e) {
     console.error('export/word:', e.message);
@@ -844,7 +861,7 @@ app.post('/api/projects/:projectId/export/pdf', requireAuth, requireProjectMembe
     const { posts } = req.body;
     if (!Array.isArray(posts) || !posts.length) return res.status(400).json({ error: 'Brak postow do eksportu' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.pdf"');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + (await getProjectFilenameSlug(req.projectId)) + '-eksport.pdf"');
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
     doc.registerFont('Gilroy', path.join(__dirname, 'assets/fonts/Gilroy-Regular.otf'));
     doc.registerFont('Gilroy-Bold', path.join(__dirname, 'assets/fonts/Gilroy-SemiBold.otf'));
@@ -880,7 +897,7 @@ app.post('/api/projects/:projectId/export/zip', requireAuth, requireProjectMembe
     const { posts } = req.body;
     if (!Array.isArray(posts) || !posts.length) return res.status(400).json({ error: 'Brak postow do eksportu' });
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="25wat-eksport.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + (await getProjectFilenameSlug(req.projectId)) + '-eksport.zip"');
     const archive = archiver('zip', { zlib: { level: 9 } });
     archive.on('error', function(err) { console.error('archiver error:', err.message); });
     archive.pipe(res);
@@ -1037,7 +1054,7 @@ Odpowiedz TYLKO JSON bez markdown:
       shapeChoice = accentChoices.find(s => s !== previousAccentShape) || shapeChoice;
     }
 
-    const headline = (raw.headline || post.title || '25wat').toString().slice(0, 120);
+    const headline = (raw.headline || post.title || 'Nowy post').toString().slice(0, 120);
     const headlineHighlight = (raw.headlineHighlight || '').toString().slice(0, 60);
     const doodleFile = `doodle-${pair.doodleName}-${doodleType}.svg`;
 
@@ -1073,7 +1090,11 @@ Odpowiedz TYLKO JSON bez markdown:
       assets: {
         doodle: `/assets/graphic/doodle/${doodleFile}`,
         accent: accentFile ? `/assets/graphic/${accentFolder}/${accentFile}` : null,
-        logo: (designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : (pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg'),
+        logo: (designAssets && designAssets.logoDataUrl)
+          ? designAssets.logoDataUrl
+          : ((!projectId || Number(projectId) === LEGACY_25WAT_PROJECT_ID)
+              ? (pair.bgName === 'dark' ? '/assets/logo/primary-logo-25wat-light.svg' : '/assets/logo/primary-logo-25wat-dark.svg')
+              : null),
       }
     });
   } catch(e) {
@@ -1513,6 +1534,42 @@ INTERPUNKCJA I JĘZYK:
 - Unikaj strony biernej ("zostało wdrożone" → "wdrożyliśmy")`;
 
 const LEGACY_25WAT_PROJECT_ID = 1;
+
+async function getProjectClientWeb(projectId) {
+  if (!projectId) return [];
+  try {
+    const result = await pool.query(
+      "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'client_web' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    const text = result.rows[0] && result.rows[0].text_content;
+    if (!text) return [];
+    const urls = text.match(/https?:\/\/[^\s|]+/g) || [];
+    const domains = [];
+    urls.forEach(u => {
+      try {
+        const d = new URL(u).hostname.replace(/^www\./, '');
+        if (d && !domains.includes(d)) domains.push(d);
+      } catch (e) {}
+    });
+    return domains;
+  } catch (e) {
+    console.error('getProjectClientWeb:', e.message);
+    return [];
+  }
+}
+
+async function getClientFacts(projectId, dateLabel) {
+  const domains = await getProjectClientWeb(projectId);
+  if (!domains.length) return null;
+  try {
+    const { text } = await tavilySearchFull('oferta uslugi produkty aktualnosci ' + dateLabel, domains);
+    return (text && text.trim().length > 30) ? text.slice(0, 2000) : null;
+  } catch (e) {
+    console.error('getClientFacts:', e.message);
+    return null;
+  }
+}
 
 async function getProjectCompetitors(projectId) {
   try {
