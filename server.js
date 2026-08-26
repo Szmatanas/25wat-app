@@ -782,7 +782,10 @@ app.post('/api/research/auto', async (req, res) => {
       results.push({ type: 'competitors_missing', checkedAt: dateLabel });
     } else {
       const comp = await Promise.allSettled(activeCompetitors.map(async (c) => {
-        const { text: ctx, sources } = await tavilySearchFull(c.query, c.domains || COMPETITOR_DOMAINS);
+        // Bez znanej domeny NIE zawezamy do samego linkedin.com - to trafia na przypadkowe
+        // osoby prywatne o tym samym nazwisku/nazwie (np. "Kruk"). Ogolne wyszukiwanie
+        // po calym webie lepiej trafia na strone/wzmianki o firmie.
+        const { text: ctx, sources } = await tavilySearchFull(c.query, c.domains);
         if (!ctx || ctx.trim().length < 30) {
           return { name: c.name, analysis: { message: null, topic: null, opportunity: null, threat_level: 'low', noData: true }, sources: [], checkedAt: dateLabel };
         }
