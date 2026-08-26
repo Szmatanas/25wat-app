@@ -186,6 +186,17 @@ async function requireProjectSettingsAccess(req, res, next) {
   }
 }
 
+async function resolveUserPhotoBase64(userPhoto) {
+  if (!userPhoto) return null;
+  if (/^https?:\/\//i.test(userPhoto)) {
+    const r = await fetch(userPhoto);
+    if (!r.ok) throw new Error('Nie udalo sie pobrac zdjecia (userPhoto url): ' + r.status);
+    const buf = Buffer.from(await r.arrayBuffer());
+    return buf.toString('base64');
+  }
+  return userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+}
+
 async function getOpenAiKey(projectId) {
   if (projectId) {
     try {
@@ -1180,7 +1191,7 @@ Build the entire composition around this photo. Modify only the surrounding grap
       imageContentParts.push({ type: 'input_image', image_url: designAssets.logoDataUrl });
     }
     if (wantsPhoto) {
-      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const b64in = await resolveUserPhotoBase64(userPhoto);
       imageContentParts.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${b64in}` });
     }
 
@@ -1288,7 +1299,7 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
     }
     let photoPart = null;
     if (wantsPhoto) {
-      const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+      const b64in = await resolveUserPhotoBase64(userPhoto);
       photoPart = { type: 'input_image', image_url: `data:image/jpeg;base64,${b64in}` };
     }
 
@@ -1412,7 +1423,7 @@ app.post('/api/design/generate-image-raw', async (req, res) => {
       const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
       form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
     }
-    const b64in = userPhoto.includes(',') ? userPhoto.split(',')[1] : userPhoto;
+    const b64in = await resolveUserPhotoBase64(userPhoto);
     const photoBuf = Buffer.from(b64in, 'base64');
     form.append('image[]', new Blob([photoBuf], { type: 'image/jpeg' }), 'real_photo.jpg');
     form.append('prompt', prompt);
