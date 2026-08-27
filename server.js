@@ -1256,9 +1256,16 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     // Instrukcja o logo musi byc spojna z tym, czy obraz logo faktycznie jest
     // dolaczony (patrz test A/B nizej przy imageContentParts) - inaczej model
     // dostalby instrukcje o obrazie, ktorego nie ma.
+    // Przy zdjeciu WGRANYM logo nie jest wysylane do AI wcale (patrz wyzej -
+    // ochrona przed identity driftem) - jest doklejane programowo PO
+    // wygenerowaniu (server-side, sharp - patrz kod nizej przy blob upload).
+    // Bez jawnej instrukcji model sam probowal "wymyslic" brandowanie (np.
+    // duzy dekoracyjny napis z nazwa marki) - stad jawny zakaz ponizej.
     const logoInstruction = (designAssets && designAssets.logoDataUrl && !isUploadedPhoto)
       ? 'Jeden z dołączonych obrazów to dokładne logo marki - umieść je czytelnie w rogu kompozycji (tam gdzie nie koliduje z tekstem), zachowaj dokładny kształt i kolory logo, nie przerysowuj go ani nie zmieniaj.'
-      : '';
+      : (isUploadedPhoto && designAssets && designAssets.logoDataUrl)
+        ? 'WAŻNE O LOGO: prawdziwe logo marki zostanie doklejone automatycznie w lewym górnym rogu obrazu PO wygenerowaniu (poza tym promptem) - dlatego NIE rysuj żadnego logo, znaku graficznego marki ani nazwy marki jako osobnego dekoracyjnego napisu czy nagłówka (np. nie pisz samej nazwy firmy jako dużego tytułu). Zostaw obszar w lewym górnym rogu (mniej więcej 12% szerokości i 10% wysokości od krawędzi) wizualnie pusty - bez tekstu, bez grafiki - żeby nie kolidował z logo, które zostanie tam dodane. Jedyny tekst na grafice to prawdziwy headline i ewentualny podtekst z instrukcji poniżej - nie dodawaj żadnego dodatkowego napisu z nazwą marki.'
+        : '';
 
     const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n${logoInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
 
@@ -1354,8 +1361,8 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       try {
         const [outW, outH] = size.split('x').map(Number);
         const baseDim = Math.min(outW, outH);
-        const logoHeight = Math.max(28, Math.round(baseDim * 0.07));
-        const margin = Math.max(16, Math.round(baseDim * 0.05));
+        const logoHeight = Math.max(40, Math.round(baseDim * 0.09));
+        const margin = Math.max(20, Math.round(baseDim * 0.06));
         const logoMatch = designAssets.logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (logoMatch) {
           const logoBuf = Buffer.from(logoMatch[2], 'base64');
