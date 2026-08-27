@@ -1318,6 +1318,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       // gwarantuje 100% wiernosc logo bez ryzyka wplywu na tozsamosc osoby.
       logo: (isUploadedPhoto && designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : null
     });
+    console.log('generate-image debug: isUploadedPhoto=' + isUploadedPhoto + ' hasLogoDataUrl=' + !!(designAssets && designAssets.logoDataUrl) + ' logoDataUrlLen=' + ((designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl.length : 0) + ' refMode=' + refMode);
   } catch(e) {
     console.error('generate-image:', e.message);
     res.status(500).json({ error: e.message });
