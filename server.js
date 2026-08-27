@@ -1312,7 +1312,11 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       format: format || 'post-4-5',
       size,
-      logo: null
+      // Gdy logo nie zostalo dolaczone jako obraz do AI (test A/B - unikanie
+      // identity driftu przy zdjeciu wgranym), zwracamy je tutaj jako gotowy
+      // data URL, zeby frontend nalozyl je programowo na gotowy obraz -
+      // gwarantuje 100% wiernosc logo bez ryzyka wplywu na tozsamosc osoby.
+      logo: (isUploadedPhoto && designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : null
     });
   } catch(e) {
     console.error('generate-image:', e.message);
