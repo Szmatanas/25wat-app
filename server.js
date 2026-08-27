@@ -948,32 +948,49 @@ app.post('/api/design/upload-photo', async (req, res) => {
 
 app.post('/api/design/generate-photo', async (req, res) => {
   const { postTitle, projectId } = req.body;
+  const SAFETY_CLARIFIER = 'The person is fully clothed in modest, professional business-casual attire (shirt buttoned, no swimwear, no exposed midriff or cleavage), non-suggestive pose, completely safe-for-work and family-friendly.';
   const hasDescription = !!(postTitle && postTitle.trim().length > 0);
   const prompt = hasDescription
-    ? `Photorealistic editorial image, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the subject's appearance, setting and activity - the subject may be a person, an object, an animal, a creature, a mascot or anything else described below. Do not force a human figure, generic office attire or any specific ethnicity/appearance unless the description itself explicitly calls for it: ${postTitle}.`
-    : `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Vary the person's ethnicity and appearance naturally and diversely across generations - do not default to any single ethnicity or appearance every time.`;
+    ? `Photorealistic editorial image, natural soft daylight, clean neutral background suitable for knockout, calm confident mood, no filters, no stock-photo vibe, 4:5 aspect ratio. Follow this description closely for the subject's appearance, setting and activity - the subject may be a person, an object, an animal, a creature, a mascot or anything else described below. Do not force a human figure, generic office attire or any specific ethnicity/appearance unless the description itself explicitly calls for it. ${SAFETY_CLARIFIER} Description: ${postTitle}.`
+    : `Candid editorial portrait of a confident person in their 30s, wearing a strong-colored shirt (orange, green or grey), sitting at a laptop in a real modern office, making eye contact, natural soft daylight, clean neutral background suitable for knockout, calm professional mood, no filters, no stock-photo vibe, photorealistic, 4:5 aspect ratio. Vary the person's ethnicity and appearance naturally and diversely across generations - do not default to any single ethnicity or appearance every time. ${SAFETY_CLARIFIER}`;
   try {
     const OPENAI_KEY = await getOpenAiKey(projectId);
-    const r = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + OPENAI_KEY
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt,
-        n: 1,
-        size: '1024x1536',
-        quality: 'high'
-      })
-    });
-    if (!r.ok) {
+    let lastErr = null;
+    let data = null;
+    // gpt-image-1 czasem falszywie odrzuca zupelnie niewinne portrety jako "sexual"
+    // (moderation output false-positive) - to nie jest deterministyczne, wiec przy
+    // takim konkretnym bledzie probujemy ponownie zamiast od razu poddawac sie.
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const r = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + OPENAI_KEY
+        },
+        body: JSON.stringify({
+          model: 'gpt-image-1',
+          prompt,
+          n: 1,
+          size: '1024x1536',
+          quality: 'high'
+        })
+      });
+      if (r.ok) {
+        data = await r.json();
+        lastErr = null;
+        break;
+      }
       const errText = await r.text();
-      console.error('generate-photo: OpenAI HTTP ' + r.status + ': ' + errText);
-      throw new Error('OpenAI HTTP ' + r.status + ': ' + errText.slice(0, 300));
+      console.error('generate-photo: proba ' + attempt + '/' + MAX_ATTEMPTS + ' - OpenAI HTTP ' + r.status + ': ' + errText);
+      let isModeration = false;
+      try { isModeration = JSON.parse(errText).error?.code === 'moderation_blocked'; } catch (e) {}
+      lastErr = new Error(isModeration
+        ? 'OpenAI kilkukrotnie blednie odrzucil zdjecie jako niebezpieczne (falszywy alarm moderacji) - sprobuj ponownie za chwile lub zmien opis zdjecia.'
+        : ('OpenAI HTTP ' + r.status + ': ' + errText.slice(0, 300)));
+      if (!isModeration) break; // inny blad (np. zly klucz) - nie ma sensu ponawiac
     }
-    const data = await r.json();
+    if (lastErr) throw lastErr;
     if (data.data?.[0]?.b64_json) {
       const url = await uploadImageToBlob(data.data[0].b64_json, 'png');
       res.json({ url });
