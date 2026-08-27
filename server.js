@@ -1248,7 +1248,10 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
 
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ją: ${styleNote}` : '';
 
-    const logoInstruction = (designAssets && designAssets.logoDataUrl)
+    // Instrukcja o logo musi byc spojna z tym, czy obraz logo faktycznie jest
+    // dolaczony (patrz test A/B nizej przy imageContentParts) - inaczej model
+    // dostalby instrukcje o obrazie, ktorego nie ma.
+    const logoInstruction = (designAssets && designAssets.logoDataUrl && !isUploadedPhoto)
       ? 'Jeden z dołączonych obrazów to dokładne logo marki - umieść je czytelnie w rogu kompozycji (tam gdzie nie koliduje z tekstem), zachowaj dokładny kształt i kolory logo, nie przerysowuj go ani nie zmieniaj.'
       : '';
 
@@ -1271,7 +1274,11 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
         imageContentParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
       }
     }
-    if (designAssets && designAssets.logoDataUrl) {
+    // TYMCZASOWY test A/B izolujacy przyczyne identity driftu (nie usuwac bez
+    // decyzji Jana): przy zdjeciu WGRANYM logo nie jest dolaczane jako osobny
+    // obraz do requestu, zeby sprawdzic czy sama obecnosc/liczba obrazow ma
+    // znaczenie. Nic innego (schemat, kolejnosc, kolory, model) nie zmienione.
+    if (designAssets && designAssets.logoDataUrl && !isUploadedPhoto) {
       imageContentParts.push({ type: 'input_image', image_url: designAssets.logoDataUrl });
     }
     if (wantsPhoto) {
