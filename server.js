@@ -1039,11 +1039,13 @@ ZASADY (nieprzekraczalne):
 - ${hasPhoto ? 'Ksztalt zdjecia: ' + accentChoices.join(', ') + '.' : (hasAccent ? 'Ksztalt akcentu: ' + accentChoices.join(', ') + ' (flubber-N to numer 1-5, lub geometryczny asterisk/chevrons).' : 'Ta para kolorow nie ma akcentu - ustaw accentShape na none.')}
 - Dopasuj strefe i wyrownanie do nastroju i dlugosci headline.${variationNote}
 
+Headline pisz poprawną polszczyzną, zawsze z pełnymi polskimi znakami diakrytycznymi (ą, ę, ó, ś, ź, ż, ć, ń, ł) tam gdzie gramatycznie wystepują - nigdy ich nie pomijaj.
+
 Odpowiedz TYLKO JSON bez markdown:
-{"headline":"max 8 slow po polsku","headlineHighlight":"fragment do wyroznienia (dokladny podciag)","doodleType":"jeden z: ${DOODLE_TYPES.join('|')}","zone":"jeden z: ${ZONES.join('|')}","align":"jeden z: ${ALIGNS.join('|')}","${hasPhoto ? 'photoShape' : 'accentShape'}":"jeden z: ${accentChoices.join('|')}"}`;
+{"headline":"max 8 słów po polsku, z polskimi znakami","headlineHighlight":"fragment do wyróżnienia (dokładny podciąg)","doodleType":"jeden z: ${DOODLE_TYPES.join('|')}","zone":"jeden z: ${ZONES.join('|')}","align":"jeden z: ${ALIGNS.join('|')}","${hasPhoto ? 'photoShape' : 'accentShape'}":"jeden z: ${accentChoices.join('|')}"}`;
 
   try {
-    const context = `Tytul posta: ${post.title || ''}\nTyp posta: ${post.type || ''}\nTresc posta: ${post.content}`;
+    const context = `Tytuł posta: ${post.title || ''}\nTyp posta: ${post.type || ''}\nTreść posta: ${post.content}`;
     const raw = await claude(sys, context);
     const doodleType = pick(raw.doodleType, DOODLE_TYPES, 'underlines-1');
     let zone = pick(raw.zone, ZONES, ZONES[0]);
@@ -1170,13 +1172,13 @@ app.post('/api/design/generate-image', async (req, res) => {
       : fs.readFileSync(schemaPath, 'utf8');
     const EXAMPLES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/examples');
 
-    const postText = `Tytul: ${post.title || ''}\n${post.content || ''}`;
+    const postText = `Tytuł: ${post.title || ''}\n${post.content || ''}`;
 
-    const colorInstruction = `UZYJ DOKLADNIE tej pary kolorow, nie wybieraj innej z tabeli w schemacie: tlo ${pair.bg} (${pair.bgName}), tekst ${pair.text}, akcent ${pair.accent} (${pair.accentName}).`;
+    const colorInstruction = `UŻYJ DOKŁADNIE tej pary kolorów, nie wybieraj innej z tabeli w schemacie: tło ${pair.bg} (${pair.bgName}), tekst ${pair.text}, akcent ${pair.accent} (${pair.accentName}). Cały tekst na grafice pisz poprawną polszczyzną, z pełnymi polskimi znakami (ą, ę, ó, ś, ź, ż, ć, ń, ł) - nigdy nie pomijaj polskich znaków diakrytycznych.`;
 
     const headlineInstruction = customHeadline
-      ? `Uzyj DOKLADNIE tego headline, nie zmieniaj tresci: "${customHeadline}"`
-      : `Wyciagnij z posta krotki, konkretny headline (max 3 linie) - dokladnie o tym, o czym jest ten post, nie ogolnik o firmie.`;
+      ? `Użyj DOKŁADNIE tego headline, nie zmieniaj treści: "${customHeadline}"`
+      : `Wyciągnij z posta krótki, konkretny headline (max 3 linie) - dokładnie o tym, o czym jest ten post, nie ogólnik o firmie. Zachowaj poprawne polskie znaki diakrytyczne (ą, ę, ó, ś, ź, ż, ć, ń, ł).`;
 
     const photoInstruction = wantsPhoto ? `The LAST attached image is the real photo of the person featured in this post. This photo has higher priority than every other reference image attached below.
 
@@ -1190,12 +1192,12 @@ The person must be indistinguishable from the supplied photograph.
 
 Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.${usingCustomRefs ? `
 
-IMPORTANT: any people, faces, or human figures visible in the OTHER reference images attached earlier (before this last photo) are completely irrelevant to this task - those images are used ONLY as style/layout/typography/color references. Ignore any face or identity shown in them entirely. Do not blend, merge, average, or borrow any facial feature, skin tone, hairstyle or expression from them. The ONLY identity that matters anywhere in this composition is the person in the LAST attached photo.` : ''}` : 'Ten post nie ma zdjecia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjecia i bez osoby.';
+IMPORTANT: any people, faces, or human figures visible in the OTHER reference images attached earlier (before this last photo) are completely irrelevant to this task - those images are used ONLY as style/layout/typography/color references. Ignore any face or identity shown in them entirely. Do not blend, merge, average, or borrow any facial feature, skin tone, hairstyle or expression from them. The ONLY identity that matters anywhere in this composition is the person in the LAST attached photo.` : ''}` : 'Ten post nie ma zdjęcia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjęcia i bez osoby.';
 
-    const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ja: ${styleNote}` : '';
+    const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ją: ${styleNote}` : '';
 
     const logoInstruction = (designAssets && designAssets.logoDataUrl)
-      ? 'Jeden z dolaczonych obrazow to dokladne logo marki - umiesc je czytelnie w rogu kompozycji (tam gdzie nie koliduje z tekstem), zachowaj dokladny ksztalt i kolory logo, nie przerysowuj go ani nie zmieniaj.'
+      ? 'Jeden z dołączonych obrazów to dokładne logo marki - umieść je czytelnie w rogu kompozycji (tam gdzie nie koliduje z tekstem), zachowaj dokładny kształt i kolory logo, nie przerysowuj go ani nie zmieniaj.'
       : '';
 
     const prompt = `${wantsPhoto ? 'PRIORYTET: dolaczone zdjecie osoby jest najwazniejsze - patrz instrukcja o zdjeciu nizej.\n\n' : ''}${schemaText}\n\n---\n\n${colorInstruction}\n${headlineInstruction}\n\n${photoInstruction}\n${styleInstruction}\n${logoInstruction}\n\nTresc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem, referencjami i powyzszymi instrukcjami.`;
@@ -1810,12 +1812,12 @@ app.post('/api/content/generate', async (req, res) => {
         label: 'Facebook',
         types: ['edukacyjny','storytelling','prowokacyjny','angażujący'],
         rules: `ZASADY FORMATU FB:
-- Pierwsze zdanie to HOOK - ma zatrzymac scrollowanie, max 12 slow, zaczyna sie od liczby lub prowokacyjnego stwierdzenia
-- Krotkie akapity: 1-2 zdania, oddzielone pustą linią
-- Emoji jako separatory sekcji (nie dekoracja): uzyj 2-4 emoji w strategicznych miejscach
+- Pierwsze zdanie to HOOK - ma zatrzymać scrollowanie, max 12 słów, zaczyna się od liczby lub prowokacyjnego stwierdzenia
+- Krótkie akapity: 1-2 zdania, oddzielone pustą linią
+- Emoji jako separatory sekcji (nie dekoracja): użyj 2-4 emoji w strategicznych miejscach
 - Ostatnie zdanie to CTA lub pytanie do odbiorcy
-- Dlugosc: 150-250 slow`,
-        categories: `1. Edukacyjny - dane i liczby, lista punktow z emoji
+- Długość: 150-250 słów`,
+        categories: `1. Edukacyjny - dane i liczby, lista punktów z emoji
 2. Storytelling - historia klienta, konkretna sytuacja przed/po
 3. Prowokacyjny - obalenie mitu lub kontrowersyjna teza
 4. Angażujący - pytanie otwarte, zaproszenie do dyskusji`
@@ -1824,29 +1826,29 @@ app.post('/api/content/generate', async (req, res) => {
         label: 'Instagram',
         types: ['edukacyjny','behind-the-scenes','inspirujący','angażujący'],
         rules: `ZASADY FORMATU IG:
-- Pierwsze zdanie to HOOK wizualny - krotki, konkretny, max 10 slow
-- Prosty, lekki jezyk - lifestyle, bez korpomowy
-- Krotkie akapity, mozna uzyc emoji jako akcentow (2-3, lekko)
-- Ostatnie zdanie to CTA typu "zapisz/udostepnij/napisz w komentarzu"
-- Dlugosc: 80-150 slow (Instagram = zwiezlosc i wizualnosc, nie esej)`,
-        categories: `1. Edukacyjny - szybkie tipy, lista punktow
-2. Behind-the-scenes - kulisy pracy, proces, ludzie za marka
-3. Inspirujący - lifestyle, wartosci, krotka historia
+- Pierwsze zdanie to HOOK wizualny - krótki, konkretny, max 10 słów
+- Prosty, lekki język - lifestyle, bez korpomowy
+- Krótkie akapity, można użyć emoji jako akcentów (2-3, lekko)
+- Ostatnie zdanie to CTA typu "zapisz/udostępnij/napisz w komentarzu"
+- Długość: 80-150 słów (Instagram = zwięzłość i wizualność, nie esej)`,
+        categories: `1. Edukacyjny - szybkie tipy, lista punktów
+2. Behind-the-scenes - kulisy pracy, proces, ludzie za marką
+3. Inspirujący - lifestyle, wartości, krótka historia
 4. Angażujący - pytanie/ankieta, zaproszenie do interakcji`
       },
       li: {
         label: 'LinkedIn',
         types: ['ekspercki','case-study','kontrariański','dyskusyjny'],
         rules: `ZASADY FORMATU LI:
-- Pierwsze zdanie to HOOK ekspercki - obserwacja, dana lub teza branzowa, max 15 slow
-- Ton biznesowy, ekspercki. Emoji TYLKO jako wskaznik pojedynczej kluczowej linii (np. przed CTA/pytaniem, lokalizacja, data) - max 2-3 takie akcenty, nigdy jako dekoracja calego tekstu czy zamiennik punktorow
-- Struktura: teza/obserwacja -> konkretny przyklad lub doswiadczenie -> wniosek
-- Ostatnie zdanie to zaproszenie do dyskusji branzowej (pytanie do innych profesjonalistow)
-- Dlugosc: 200-350 slow (LinkedIn = thought leadership, dluzsza forma OK)`,
-        categories: `1. Ekspercki - dane, analiza, punkt widzenia oparty na doswiadczeniu
+- Pierwsze zdanie to HOOK ekspercki - obserwacja, dana lub teza branżowa, max 15 słów
+- Ton biznesowy, ekspercki. Emoji TYLKO jako wskaźnik pojedynczej kluczowej linii (np. przed CTA/pytaniem, lokalizacja, data) - max 2-3 takie akcenty, nigdy jako dekoracja całego tekstu czy zamiennik punktorów
+- Struktura: teza/obserwacja -> konkretny przykład lub doświadczenie -> wniosek
+- Ostatnie zdanie to zaproszenie do dyskusji branżowej (pytanie do innych profesjonalistów)
+- Długość: 200-350 słów (LinkedIn = thought leadership, dłuższa forma OK)`,
+        categories: `1. Ekspercki - dane, analiza, punkt widzenia oparty na doświadczeniu
 2. Case study - konkretny projekt/klient, sytuacja przed/po, mierzalny efekt
-3. Kontrariański - podważenie powszechnej opinii w branzy, poparte argumentem
-4. Dyskusyjny - pytanie do sieci kontaktow, zaproszenie do wymiany doswiadczen`
+3. Kontrariański - podważenie powszechnej opinii w branży, poparte argumentem
+4. Dyskusyjny - pytanie do sieci kontaktów, zaproszenie do wymiany doświadczeń`
       }
     };
     const CHANNEL_ALIAS = { 'meta-ads': 'fb', 'li-ads': 'li' };
@@ -1868,18 +1870,19 @@ app.post('/api/content/generate', async (req, res) => {
       : '{"type":"' + t + '","title":"...","content":"..."}'
     ).join(',');
 
-    const prompt = `Napisz 4 rozne propozycje postow na ${ch.label} dla ${brandLabel} na temat: "${topic}".
+    const prompt = `Napisz 4 różne propozycje postów na ${ch.label} dla ${brandLabel} na temat: "${topic}".
 
 ${ch.rules}
 
-Kazda propozycja inny kat narracyjny:
+Każda propozycja inny kąt narracyjny:
 ${ch.categories}
 
-Wazne zasady:
-- W tresci uzyj punktorow jako • (kropka) nie jako myslniki
-- Pierwsze zdanie bez imienia autora, bez "Czesc"
+Ważne zasady:
+- Pisz zawsze poprawną polszczyzną, z pełnymi polskimi znakami (ą, ę, ó, ś, ź, ż, ć, ń, ł) - to obowiązkowe w każdym słowie, gdzie występują
+- W treści użyj punktorów jako • (kropka) nie jako myślniki
+- Pierwsze zdanie bez imienia autora, bez "Cześć"
 
-Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzyslowow:
+Odpowiedz TYLKO JSON bez markdown bez em-dash bez typograficznych cudzysłowów:
 {"posts":[${typesExample}]}`;
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
