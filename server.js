@@ -1169,9 +1169,11 @@ const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
   const _t0 = Date.now();
-  const _elapsed = () => (Date.now() - _t0) + 'ms';
+  const _reqId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+  const _elapsed = () => Date.now() - _t0;
+  const _log = (stage, extra) => console.log('[generate-image] ' + stage + ' requestId=' + _reqId + ' elapsedMs=' + _elapsed() + (extra ? ' ' + extra : ''));
   const { post, colorPairIdx, userPhoto, photoSource, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
-  console.log('[generate-image] request_start elapsed=' + _elapsed() + ' projectId=' + projectId + ' hasUploadedPhoto=' + (photoSource === 'uploaded') + ' hasPhoto=' + (hasPhoto !== false && !!userPhoto));
+  _log('REQUEST_START', 'projectId=' + projectId + ' hasUploadedPhoto=' + (photoSource === 'uploaded') + ' hasPhoto=' + (hasPhoto !== false && !!userPhoto) + ' format=' + format);
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = await getOpenAiKey(projectId);
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -1263,18 +1265,28 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     // Responses API + image_generation tool: model sam decyduje jak zbudowac obraz
     // na podstawie calego kontekstu (tekst + obrazy), zamiast statycznego images/edits.
     const imageContentParts = [];
+    const _imgMeta = []; // wylacznie do logow: etykieta zrodla + typ + rozmiar bajtowy, bez base64
+    function _pushImg(label, mime, b64orUrl) {
+      const isDataUrl = typeof b64orUrl === 'string' && b64orUrl.startsWith('data:');
+      const b64part = isDataUrl ? b64orUrl.split(',')[1] : b64orUrl;
+      const approxBytes = b64part ? Math.round(b64part.length * 0.75) : null;
+      _imgMeta.push({ label, mime, approxBytes });
+    }
     if (usingCustomRefs) {
       designAssets.referenceImages.forEach(function(img){
         imageContentParts.push({ type: 'input_image', image_url: `data:${img.mime};base64,${img.base64}` });
+        _pushImg('reference-custom', img.mime, img.base64);
       });
     } else if (usingLearnedPatterns) {
       designAssets.learnedPatternImages.forEach(function(img){
         imageContentParts.push({ type: 'input_image', image_url: `data:${img.mime};base64,${img.base64}` });
+        _pushImg('reference-learned-pattern', img.mime, img.base64);
       });
     } else {
       for (const f of references) {
         const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
         imageContentParts.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` });
+        _pushImg('reference-fixed', 'image/png', buf.toString('base64'));
       }
     }
     // TYMCZASOWY test A/B izolujacy przyczyne identity driftu (nie usuwac bez
@@ -1283,37 +1295,57 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     // znaczenie. Nic innego (schemat, kolejnosc, kolory, model) nie zmienione.
     if (designAssets && designAssets.logoDataUrl && !isUploadedPhoto) {
       imageContentParts.push({ type: 'input_image', image_url: designAssets.logoDataUrl });
+      _pushImg('logo', 'unknown', designAssets.logoDataUrl);
     }
     if (wantsPhoto) {
       const b64in = await resolveUserPhotoBase64(userPhoto);
       imageContentParts.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${b64in}` });
+      _pushImg('user-photo', 'image/jpeg', b64in);
     }
 
     const promptForApi = prompt + '\n\nWygeneruj teraz obraz tego posta przy uzyciu narzedzia image_generation. Nie odpowiadaj tekstem - wywolaj narzedzie i zwroc obraz.';
 
     const hasLogoAttached = !!(designAssets && designAssets.logoDataUrl && !isUploadedPhoto);
     const _meta = 'projectId=' + projectId + ' images=' + imageContentParts.length + ' hasLogoAttached=' + hasLogoAttached + ' hasUploadedPhoto=' + isUploadedPhoto + ' refMode=' + refMode;
-    console.log('[generate-image] openai_start elapsed=' + _elapsed() + ' ' + _meta);
-    const responsesReq = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-5',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
-        tools: [{ type: 'image_generation', size }],
-        tool_choice: { type: 'image_generation' }
-      })
-    });
-    console.log('[generate-image] openai_response elapsed=' + _elapsed() + ' httpStatus=' + responsesReq.status + ' ' + _meta);
-    const respData = await responsesReq.json();
-    if (respData.error) throw new Error('OpenAI: ' + respData.error.message);
+    const _imgMetaStr = 'imageDetails=' + JSON.stringify(_imgMeta);
+    _log('ASSETS_READY', _meta + ' ' + _imgMetaStr);
+
+    _log('OPENAI_START', _meta);
+    let responsesReq;
+    try {
+      responsesReq = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({
+          model: 'gpt-5',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
+          tools: [{ type: 'image_generation', size }],
+          tool_choice: { type: 'image_generation' }
+        })
+      });
+    } catch (fetchErr) {
+      _log('OPENAI_DONE', _meta + ' fetchFailed=true fetchErrorName=' + fetchErr.name + ' fetchErrorMessage=' + fetchErr.message + ' fetchErrorCause=' + (fetchErr.cause ? JSON.stringify(fetchErr.cause) : 'n/a'));
+      throw fetchErr;
+    }
+    let respData;
+    try {
+      respData = await responsesReq.json();
+    } catch (parseErr) {
+      _log('OPENAI_DONE', _meta + ' httpStatus=' + responsesReq.status + ' jsonParseFailed=true parseErrorMessage=' + parseErr.message);
+      throw parseErr;
+    }
+    if (respData.error) {
+      _log('OPENAI_DONE', _meta + ' httpStatus=' + responsesReq.status + ' openaiErrorBody=' + JSON.stringify(respData.error));
+      throw new Error('OpenAI: ' + respData.error.message);
+    }
+    _log('OPENAI_DONE', _meta + ' httpStatus=' + responsesReq.status);
     const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
     if (!imgCall || !imgCall.result) throw new Error('OpenAI nie zwrocil obrazu (brak image_generation_call w output)');
     const b64 = imgCall.result;
 
-    console.log('[generate-image] blob_upload_start elapsed=' + _elapsed() + ' ' + _meta);
+    _log('BLOB_START', _meta);
     const uploadedImageUrl = await uploadImageToBlob(b64, 'png');
-    console.log('[generate-image] blob_upload_done elapsed=' + _elapsed() + ' ' + _meta);
+    _log('BLOB_DONE', _meta);
     res.json({
       image: uploadedImageUrl,
       prompt,
@@ -1327,9 +1359,9 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       // gwarantuje 100% wiernosc logo bez ryzyka wplywu na tozsamosc osoby.
       logo: (isUploadedPhoto && designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : null
     });
-    console.log('[generate-image] response_sent elapsed=' + _elapsed() + ' ' + _meta);
+    _log('RESPONSE_SENT', _meta);
   } catch(e) {
-    console.error('[generate-image] ERROR elapsed=' + _elapsed() + ' name=' + e.name + ' message=' + e.message + ' status=' + (e.status || e.statusCode || 'n/a') + ' code=' + (e.code || 'n/a') + ' cause=' + (e.cause ? JSON.stringify(e.cause) : 'n/a'));
+    _log('REQUEST_ERROR', 'name=' + e.name + ' message=' + e.message + ' status=' + (e.status || e.statusCode || 'n/a') + ' code=' + (e.code || 'n/a') + ' cause=' + (e.cause ? JSON.stringify(e.cause) : 'n/a'));
     res.status(500).json({ error: e.message });
   }
 });
