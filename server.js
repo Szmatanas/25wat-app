@@ -968,14 +968,21 @@ app.post('/api/design/generate-photo', async (req, res) => {
         quality: 'high'
       })
     });
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error('generate-photo: OpenAI HTTP ' + r.status + ': ' + errText);
+      throw new Error('OpenAI HTTP ' + r.status + ': ' + errText.slice(0, 300));
+    }
     const data = await r.json();
     if (data.data?.[0]?.b64_json) {
       const url = await uploadImageToBlob(data.data[0].b64_json, 'png');
       res.json({ url });
     } else {
+      console.error('generate-photo: brak obrazu w odpowiedzi, pelna odpowiedz:', JSON.stringify(data).slice(0, 500));
       throw new Error(data.error?.message || 'Brak obrazu w odpowiedzi');
     }
   } catch(e) {
+    console.error('generate-photo failed:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
