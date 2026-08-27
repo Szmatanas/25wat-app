@@ -1341,7 +1341,39 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     _log('OPENAI_DONE', _meta + ' httpStatus=' + responsesReq.status);
     const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
     if (!imgCall || !imgCall.result) throw new Error('OpenAI nie zwrocil obrazu (brak image_generation_call w output)');
-    const b64 = imgCall.result;
+    let b64 = imgCall.result;
+
+    // Logo wklejane trwale w piksele obrazu (server-side, sharp) zamiast jako
+    // osobna nakladka DOM po stronie frontendu. Poprzednie podejscie (osobny
+    // <img> nad canvasem) gubilo sie przy kazdym alternatywnym widoku obrazu -
+    // lightbox, galeria zaakceptowanych postow, eksport PNG/Word/PDF/ZIP -
+    // bo kazdy z tych widokow renderuje obraz w inny sposob i zaden nie
+    // wiedzial o istnieniu logo poza chwila samego generowania. Wypalajac
+    // logo raz, tutaj, ten sam plik dziala wszedzie bez dodatkowego kodu.
+    if (isUploadedPhoto && designAssets && designAssets.logoDataUrl) {
+      try {
+        const [outW, outH] = size.split('x').map(Number);
+        const logoHeight = Math.max(16, Math.round(outH * (40 / 1536)));
+        const margin = Math.max(8, Math.round(outH * (80 / 1536)));
+        const logoMatch = designAssets.logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (logoMatch) {
+          const logoBuf = Buffer.from(logoMatch[2], 'base64');
+          const logoResized = await sharp(logoBuf).resize({ height: logoHeight }).png().toBuffer();
+          const composited = await sharp(Buffer.from(b64, 'base64'))
+            .composite([{ input: logoResized, left: margin, top: margin }])
+            .png()
+            .toBuffer();
+          b64 = composited.toString('base64');
+          _log('LOGO_COMPOSITE_DONE', _meta + ' logoHeight=' + logoHeight + ' margin=' + margin);
+        } else {
+          _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
+        }
+      } catch (logoErr) {
+        _log('LOGO_COMPOSITE_ERROR', _meta + ' name=' + logoErr.name + ' message=' + logoErr.message);
+        // Nie wywalamy calego requestu przez blad kompozycji logo - lepiej
+        // wyslac obraz bez logo niz zero obrazu.
+      }
+    }
 
     _log('BLOB_START', _meta);
     const uploadedImageUrl = await uploadImageToBlob(b64, 'png');
@@ -1353,11 +1385,9 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       pair: { bg: pair.bg, bgName: pair.bgName, text: pair.text, accent: pair.accent },
       format: format || 'post-4-5',
       size,
-      // Gdy logo nie zostalo dolaczone jako obraz do AI (test A/B - unikanie
-      // identity driftu przy zdjeciu wgranym), zwracamy je tutaj jako gotowy
-      // data URL, zeby frontend nalozyl je programowo na gotowy obraz -
-      // gwarantuje 100% wiernosc logo bez ryzyka wplywu na tozsamosc osoby.
-      logo: (isUploadedPhoto && designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : null
+      // Logo jest juz wypalone w obrazie (patrz wyzej) - nie zwracamy go
+      // osobno, zeby frontend nie dokladal drugiej (zdublowanej) nakladki.
+      logo: null
     });
     _log('RESPONSE_SENT', _meta);
   } catch(e) {
