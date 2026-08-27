@@ -1168,7 +1168,10 @@ const PHOTO_ARCHETYPES = {
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
+  const _t0 = Date.now();
+  const _elapsed = () => (Date.now() - _t0) + 'ms';
   const { post, colorPairIdx, userPhoto, photoSource, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
+  console.log('[generate-image] request_start elapsed=' + _elapsed() + ' projectId=' + projectId + ' hasUploadedPhoto=' + (photoSource === 'uploaded') + ' hasPhoto=' + (hasPhoto !== false && !!userPhoto));
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = await getOpenAiKey(projectId);
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -1288,6 +1291,9 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
 
     const promptForApi = prompt + '\n\nWygeneruj teraz obraz tego posta przy uzyciu narzedzia image_generation. Nie odpowiadaj tekstem - wywolaj narzedzie i zwroc obraz.';
 
+    const hasLogoAttached = !!(designAssets && designAssets.logoDataUrl && !isUploadedPhoto);
+    const _meta = 'projectId=' + projectId + ' images=' + imageContentParts.length + ' hasLogoAttached=' + hasLogoAttached + ' hasUploadedPhoto=' + isUploadedPhoto + ' refMode=' + refMode;
+    console.log('[generate-image] openai_start elapsed=' + _elapsed() + ' ' + _meta);
     const responsesReq = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
@@ -1298,13 +1304,16 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
         tool_choice: { type: 'image_generation' }
       })
     });
+    console.log('[generate-image] openai_response elapsed=' + _elapsed() + ' httpStatus=' + responsesReq.status + ' ' + _meta);
     const respData = await responsesReq.json();
     if (respData.error) throw new Error('OpenAI: ' + respData.error.message);
     const imgCall = (respData.output || []).find(item => item.type === 'image_generation_call');
     if (!imgCall || !imgCall.result) throw new Error('OpenAI nie zwrocil obrazu (brak image_generation_call w output)');
     const b64 = imgCall.result;
 
+    console.log('[generate-image] blob_upload_start elapsed=' + _elapsed() + ' ' + _meta);
     const uploadedImageUrl = await uploadImageToBlob(b64, 'png');
+    console.log('[generate-image] blob_upload_done elapsed=' + _elapsed() + ' ' + _meta);
     res.json({
       image: uploadedImageUrl,
       prompt,
@@ -1318,9 +1327,9 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
       // gwarantuje 100% wiernosc logo bez ryzyka wplywu na tozsamosc osoby.
       logo: (isUploadedPhoto && designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl : null
     });
-    console.log('generate-image debug: isUploadedPhoto=' + isUploadedPhoto + ' hasLogoDataUrl=' + !!(designAssets && designAssets.logoDataUrl) + ' logoDataUrlLen=' + ((designAssets && designAssets.logoDataUrl) ? designAssets.logoDataUrl.length : 0) + ' refMode=' + refMode);
+    console.log('[generate-image] response_sent elapsed=' + _elapsed() + ' ' + _meta);
   } catch(e) {
-    console.error('generate-image:', e.message);
+    console.error('[generate-image] ERROR elapsed=' + _elapsed() + ' name=' + e.name + ' message=' + e.message + ' status=' + (e.status || e.statusCode || 'n/a') + ' code=' + (e.code || 'n/a') + ' cause=' + (e.cause ? JSON.stringify(e.cause) : 'n/a'));
     res.status(500).json({ error: e.message });
   }
 });
@@ -1558,7 +1567,16 @@ app.post('/api/design/generate-image-raw', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log('25wat API running on :' + PORT));
+const httpServer = app.listen(PORT, () => console.log('25wat API running on :' + PORT));
+// Generowanie grafiki ze zdjeciem (kilka obrazow wejsciowych + quality:high +
+// upload do Blob) potrafi trwac dluzej niz domyslny 2-minutowy idle timeout
+// Node'a (server.timeout) - po jego przekroczeniu Node sam ubija polaczenie,
+// co w przegladarce wyglada jak blad CORS/net::ERR_FAILED (bo naglowki nigdy
+// nie zdazyly wyjsc). Podnosimy limit do 5 minut, zeby dlugie generowania
+// mialy szanse dokonczyc sie i wyslac realna odpowiedz/blad zamiast timeoutu.
+httpServer.timeout = 5 * 60 * 1000;
+httpServer.headersTimeout = 5 * 60 * 1000 + 5000;
+httpServer.requestTimeout = 0;
 
 const BRAND_VOICE = `Jesteś copywriterem agencji 25wat (AI Driven Agency, Wrocław). Piszesz posty na Facebook po polsku.
 
