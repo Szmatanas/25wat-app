@@ -1353,8 +1353,9 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     if (isUploadedPhoto && designAssets && designAssets.logoDataUrl) {
       try {
         const [outW, outH] = size.split('x').map(Number);
-        const logoHeight = Math.max(16, Math.round(outH * (40 / 1536)));
-        const margin = Math.max(8, Math.round(outH * (80 / 1536)));
+        const baseDim = Math.min(outW, outH);
+        const logoHeight = Math.max(28, Math.round(baseDim * 0.07));
+        const margin = Math.max(16, Math.round(baseDim * 0.05));
         const logoMatch = designAssets.logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (logoMatch) {
           const logoBuf = Buffer.from(logoMatch[2], 'base64');
