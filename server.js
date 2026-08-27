@@ -1360,19 +1360,28 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     if (isUploadedPhoto && designAssets && designAssets.logoDataUrl) {
       try {
         const [outW, outH] = size.split('x').map(Number);
-        const baseDim = Math.min(outW, outH);
-        const logoHeight = Math.max(40, Math.round(baseDim * 0.09));
-        const margin = Math.max(20, Math.round(baseDim * 0.06));
+        const margin = Math.max(24, Math.round(Math.min(outW, outH) * 0.07));
         const logoMatch = designAssets.logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (logoMatch) {
           const logoBuf = Buffer.from(logoMatch[2], 'base64');
-          const logoResized = await sharp(logoBuf).resize({ height: logoHeight }).png().toBuffer();
+          // Skalujemy logo po SZEROKOSCI, z zachowaniem jego naturalnych
+          // proporcji (nie ma jednego uniwersalnego "wysokosc=X" ktore dziala
+          // dobrze i dla znaku kwadratowego, i dla szerokiego lockupu typu
+          // "ikona + nazwa" jak b2impact - przy stalej wysokosci szeroki
+          // wariant zawsze wyglada mniejszy). Konwencja z brandbookow: logo
+          // w rogu kompozycji = ok. 16-18% szerokosci calego layoutu.
+          const logoMeta = await sharp(logoBuf).metadata();
+          const naturalLogoW = logoMeta.width || 300;
+          const naturalLogoH = logoMeta.height || 100;
+          const targetLogoW = Math.round(outW * 0.17);
+          const targetLogoH = Math.round(targetLogoW * (naturalLogoH / naturalLogoW));
+          const logoResized = await sharp(logoBuf).resize({ width: targetLogoW }).png().toBuffer();
           const composited = await sharp(Buffer.from(b64, 'base64'))
             .composite([{ input: logoResized, left: margin, top: margin }])
             .png()
             .toBuffer();
           b64 = composited.toString('base64');
-          _log('LOGO_COMPOSITE_DONE', _meta + ' logoHeight=' + logoHeight + ' margin=' + margin);
+          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
         } else {
           _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
         }
