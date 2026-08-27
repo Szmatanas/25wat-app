@@ -675,6 +675,16 @@ app.post('/api/projects/:projectId/assets', requireAuth, requireProjectMember, a
        RETURNING id, category, filename, mime_type, text_content, metadata, created_at`,
       [req.projectId, category, filename || null, mimeType || null, fileBuffer, finalTextContent, JSON.stringify(metadata || {})]
     );
+    if (category === 'learned_patterns') {
+      // biblioteka wzorcow rosnie z kazdym zaakceptowanym postem - ograniczamy
+      // do ostatnich 12, zeby nie rosla w nieskonczonosc
+      await pool.query(
+        `DELETE FROM brand_assets WHERE project_id = $1 AND category = 'learned_patterns' AND id NOT IN (
+           SELECT id FROM brand_assets WHERE project_id = $1 AND category = 'learned_patterns' ORDER BY created_at DESC LIMIT 12
+         )`,
+        [req.projectId]
+      );
+    }
     res.json({ asset: result.rows[0] });
   } catch (e) {
     console.error('upload asset:', e.message);
@@ -1158,7 +1168,7 @@ const PHOTO_ARCHETYPES = {
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
 app.post('/api/design/generate-image', async (req, res) => {
-  const { post, colorPairIdx, userPhoto, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
+  const { post, colorPairIdx, userPhoto, photoSource, photoDescription, hasPhoto, customHeadline, styleNote, format, projectId } = req.body;
   if (!post) return res.status(400).json({ error: 'Brak posta' });
   const OPENAI_KEY = await getOpenAiKey(projectId);
   if (!OPENAI_KEY) return res.status(500).json({ error: 'Brak OPENAI_KEY na serwerze' });
@@ -1187,7 +1197,25 @@ app.post('/api/design/generate-image', async (req, res) => {
   const DARK_REFS = ['dark-post-4_5-example-4.png', 'dark-post-square-example-1.png', 'dark-post-square-example-2.png', 'dark-post-square-example-3.png'];
   const LIGHT_REFS = ['light-post-4_5-example-8.png', 'light-post-square-example-5.png', 'light-post-square-example-6.png', 'light-post-square-example-7.png'];
   const references = pair.bgName === 'dark' ? DARK_REFS : LIGHT_REFS;
-  const usingCustomRefs = !!(designAssets && designAssets.referenceImages && designAssets.referenceImages.length);
+  // Wybor zrodla obrazow referencyjnych (styl/layout) w zaleznosci od sytuacji:
+  // - zdjecie WGRANE przez klienta (photoSource==='uploaded'): to jedyny przypadek
+  //   z ryzykiem "identity drift" (patrz task #27) - surowe wlasne "przyklady
+  //   kompozycji" klienta moga zawierac inne osoby i model lekko dryfuje w ich
+  //   strone mimo instrukcji "ignoruj tozsamosc". Dlatego uzywamy WYLACZNIE
+  //   sprawdzonej, rosnacej biblioteki wzorcow projektu (learned_patterns -
+  //   wzorce dodawane automatycznie przy akceptacji postow), a jesli jest jeszcze
+  //   pusta - fallback na uniwersalne, bezosobowe szablony 25wat (0% halucynacji).
+  // - zdjecie wygenerowane przez AI lub brak zdjecia: nie ma realnej tozsamosci
+  //   do ochrony, wiec uzywamy normalnie wlasnych "przykladow kompozycji" klienta
+  //   (jego prawdziwy styl wizualny), tak jak dotychczas.
+  const isUploadedPhoto = wantsPhoto && photoSource === 'uploaded';
+  const hasLearnedPatterns = !!(designAssets && designAssets.learnedPatternImages && designAssets.learnedPatternImages.length);
+  const hasOwnRefs = !!(designAssets && designAssets.referenceImages && designAssets.referenceImages.length);
+  const refMode = isUploadedPhoto
+    ? (hasLearnedPatterns ? 'learned' : 'fixed')
+    : (hasOwnRefs ? 'custom' : 'fixed');
+  const usingCustomRefs = refMode === 'custom';
+  const usingLearnedPatterns = refMode === 'learned';
 
   try {
     const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/schemat/schemat.md');
@@ -1214,7 +1242,7 @@ Do not reinterpret, beautify, stylize, redraw or replace the person. Do not gene
 
 The person must be indistinguishable from the supplied photograph.
 
-Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.${usingCustomRefs ? `
+Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.${(usingCustomRefs || usingLearnedPatterns) ? `
 
 IMPORTANT: any people, faces, or human figures visible in the OTHER reference images attached earlier (before this last photo) are completely irrelevant to this task - those images are used ONLY as style/layout/typography/color references. Ignore any face or identity shown in them entirely. Do not blend, merge, average, or borrow any facial feature, skin tone, hairstyle or expression from them. The ONLY identity that matters anywhere in this composition is the person in the LAST attached photo.` : ''}` : 'Ten post nie ma zdjęcia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjęcia i bez osoby.';
 
@@ -1231,6 +1259,10 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     const imageContentParts = [];
     if (usingCustomRefs) {
       designAssets.referenceImages.forEach(function(img){
+        imageContentParts.push({ type: 'input_image', image_url: `data:${img.mime};base64,${img.base64}` });
+      });
+    } else if (usingLearnedPatterns) {
+      designAssets.learnedPatternImages.forEach(function(img){
         imageContentParts.push({ type: 'input_image', image_url: `data:${img.mime};base64,${img.base64}` });
       });
     } else {
@@ -1686,6 +1718,10 @@ async function getProjectDesignAssets(projectId) {
       "SELECT file_data, mime_type FROM brand_assets WHERE project_id = $1 AND category = 'reference_designs' AND file_data IS NOT NULL ORDER BY created_at DESC LIMIT 4",
       [projectId]
     );
+    const patternRes = await pool.query(
+      "SELECT file_data, mime_type FROM brand_assets WHERE project_id = $1 AND category = 'learned_patterns' AND file_data IS NOT NULL ORDER BY created_at DESC LIMIT 4",
+      [projectId]
+    );
     const ctxRes = await pool.query(
       "SELECT text_content FROM brand_assets WHERE project_id = $1 AND category = 'ai_context' AND text_content IS NOT NULL ORDER BY created_at DESC LIMIT 1",
       [projectId]
@@ -1758,8 +1794,19 @@ async function getProjectDesignAssets(projectId) {
       }
       return { base64: r.file_data.toString('base64'), mime: r.mime_type || 'image/png' };
     }));
+    const learnedPatternImages = await Promise.all(patternRes.rows.map(async (r) => {
+      if (r.mime_type === 'image/svg+xml') {
+        try {
+          const pngBuf = await sharp(r.file_data).png().toBuffer();
+          return { base64: pngBuf.toString('base64'), mime: 'image/png' };
+        } catch (svgErr) {
+          console.error('learned-pattern svg->png convert:', svgErr.message);
+        }
+      }
+      return { base64: r.file_data.toString('base64'), mime: r.mime_type || 'image/png' };
+    }));
 
-    return { brandName, logoDataUrl, referenceImages, aiContextText, colorPairs };
+    return { brandName, logoDataUrl, referenceImages, learnedPatternImages, aiContextText, colorPairs };
   } catch (e) {
     console.error('getProjectDesignAssets:', e.message);
     return null;
