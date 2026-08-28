@@ -1622,7 +1622,18 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
     // logo raz, tutaj, ten sam plik dziala wszedzie bez dodatkowego kodu.
     if (isUploadedPhoto && designAssets && designAssets.logoDataUrl) {
       try {
-        const [outW, outH] = size.split('x').map(Number);
+        // NIE ufamy juz samemu stringowi 'size' wyslanemu do OpenAI - model
+        // image_generation czasem zwraca obraz o innych realnych wymiarach
+        // niz zazadane (widzielismy to jako rozjazd: log liczyl poprawny %,
+        // a wizualnie logo bylo maleńkie - dowod ze % byl liczony wzgledem
+        // zlej podstawy). Mierzymy RZECZYWISTE wymiary zwroconego obrazu.
+        const [requestedW, requestedH] = size.split('x').map(Number);
+        const genMeta = await sharp(Buffer.from(b64, 'base64')).metadata();
+        const outW = genMeta.width || requestedW;
+        const outH = genMeta.height || requestedH;
+        if (outW !== requestedW || outH !== requestedH) {
+          _log('SIZE_MISMATCH', _meta + ' requestedSize=' + size + ' actualSize=' + outW + 'x' + outH);
+        }
         const margin = Math.max(24, Math.round(Math.min(outW, outH) * 0.07));
         const logoMatch = designAssets.logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
         if (logoMatch) {
@@ -1667,7 +1678,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
             .png()
             .toBuffer();
           b64 = composited.toString('base64');
-          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + brandbookRule.source + ' confidence=' + (brandbookRule.confidence || 'n/a') + ' reasoning=' + JSON.stringify(brandbookRule.reasoning || '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
+          _log('LOGO_COMPOSITE_DONE', _meta + ' actualImageSize=' + outW + 'x' + outH + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + brandbookRule.source + ' confidence=' + (brandbookRule.confidence || 'n/a') + ' reasoning=' + JSON.stringify(brandbookRule.reasoning || '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
         } else {
           _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
         }
