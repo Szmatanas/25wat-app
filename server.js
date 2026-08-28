@@ -1167,6 +1167,93 @@ const PHOTO_ARCHETYPES = {
 };
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
+// Generyczny mechanizm (dziala dla kazdego projektu, ktory ma wgrany brandbook
+// w Bazie Wiedzy Marki, nie tylko b2impact): wyciaga z surowego tekstu
+// brandbooka (juz i tak wyekstrahowanego z PDF przy uploadzie - patrz kategoria
+// 'brandbook' w /api/projects/:projectId/assets) regule rozmiaru logo dla
+// kompozycji zdjeciowej (full-bleed photo + logo w rogu), jako procent
+// szerokosci layoutu. Wynik jest CACHE'OWANY w brand_assets (kategoria
+// 'logo_size_rule', jeden wpis per projekt) i przeliczany na nowo tylko gdy
+// tekst brandbooka sie zmienil (hash tekstu w metadata) - zeby nie odpytywac
+// LLM przy kazdym pojedynczym generowaniu grafiki.
+function _simpleTextHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) { h = (Math.imul(31, h) + str.charCodeAt(i)) | 0; }
+  return h.toString(36) + '_' + str.length;
+}
+
+async function getOrComputeLogoWidthRatio(projectId, brandbookText, openaiKey) {
+  const DEFAULT_RATIO = 0.20; // uzywane gdy brak brandbooka albo LLM nie potrafil nic sensownego wyciagnac
+  if (!brandbookText || !brandbookText.trim() || !projectId) {
+    return { ratio: DEFAULT_RATIO, source: 'default-no-brandbook', reasoning: 'Brak wgranego brandbooka dla tego projektu.' };
+  }
+  const currentHash = _simpleTextHash(brandbookText);
+  try {
+    const cached = await pool.query(
+      "SELECT text_content, metadata FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    if (cached.rows[0] && cached.rows[0].metadata && cached.rows[0].metadata.sourceHash === currentHash) {
+      const parsed = JSON.parse(cached.rows[0].text_content);
+      return { ratio: parsed.ratio, source: 'cached-from-brandbook', reasoning: parsed.reasoning, confidence: parsed.confidence };
+    }
+  } catch (readErr) {
+    console.error('getOrComputeLogoWidthRatio cache read:', readErr.message);
+  }
+
+  if (!openaiKey) return { ratio: DEFAULT_RATIO, source: 'default-no-openai-key', reasoning: 'Brak klucza OpenAI do analizy brandbooka.' };
+
+  try {
+    const analysisPrompt = `Ponizej jest tekst wyekstrahowany z brandbooka klienta (moze zawierac szum z uklada strony, to normalne). Szukam WYLACZNIE wytycznych dotyczacych ROZMIARU LOGO w kompozycji social media z pelnokadrowym zdjeciem w tle i logo umieszczonym w rogu (nie chodzi o formalne uklady drukowane typu A4/A3 z siatka, chyba ze to jedyna dostepna wskazowka).
+
+Zwroc WYLACZNIE czysty JSON (bez markdown), w formacie:
+{"ratio": liczba_miedzy_0.05_a_0.40, "confidence": "high"|"medium"|"low", "reasoning": "krotkie uzasadnienie po polsku, max 2 zdania, z odniesieniem do konkretnego zapisu z brandbooka jesli istnieje"}
+
+"ratio" to szerokosc logo jako uzamek dziesietny szerokosci calego layoutu (np. 0.20 = 20%). Jesli brandbook podaje regule dla drukowanych ukladow (np. "podziel krotszy bok formatu przez X logo"), przelicz ja na przyblizony ekwiwalent dla social media (zazwyczaj mniejszy niz w druku, logo nie powinno dominowac nad zdjeciem, ale musi byc czytelne). Jesli brandbook podaje TYLKO minimalny rozmiar w px/mm (prog czytelnosci, nie docelowy rozmiar) - nie traktuj tego jako docelowej wartosci, uzyj rozsadnego defaultu 0.18-0.22 i ustaw confidence "low". Jesli brandbook nie mowi NIC o rozmiarze logo - zwroc {"ratio": 0.18, "confidence": "low", "reasoning": "Brandbook nie zawiera wytycznych o rozmiarze logo."}.
+
+TEKST BRANDBOOKA:
+${brandbookText.slice(0, 12000)}`;
+
+    const llmRes = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: analysisPrompt }] }]
+      })
+    });
+    const llmData = await llmRes.json();
+    if (llmData.error) throw new Error('OpenAI: ' + llmData.error.message);
+    const msg = (llmData.output || []).find(item => item.type === 'message');
+    const textPart = msg && (msg.content || []).find(c => c.type === 'output_text');
+    if (!textPart) throw new Error('LLM nie zwrocil odpowiedzi tekstowej');
+    let raw = textPart.text.trim();
+    if (raw.startsWith('```')) raw = raw.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+    const parsed = JSON.parse(raw);
+    let ratio = Number(parsed.ratio);
+    if (!isFinite(ratio) || ratio < 0.05 || ratio > 0.40) ratio = DEFAULT_RATIO;
+    const result = { ratio, confidence: parsed.confidence || 'low', reasoning: parsed.reasoning || '' };
+
+    await pool.query(
+      `INSERT INTO brand_assets (project_id, category, filename, mime_type, text_content, metadata)
+       VALUES ($1, 'logo_size_rule', 'auto-analiza-brandbooka.json', 'application/json', $2, $3)`,
+      [projectId, JSON.stringify(result), JSON.stringify({ sourceHash: currentHash })]
+    );
+    // sprzatamy stare wpisy tej kategorii - trzymamy tylko najnowszy
+    await pool.query(
+      `DELETE FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' AND id NOT IN (
+         SELECT id FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' ORDER BY created_at DESC LIMIT 1
+       )`,
+      [projectId]
+    );
+
+    return { ratio: result.ratio, source: 'analyzed-from-brandbook', reasoning: result.reasoning, confidence: result.confidence };
+  } catch (e) {
+    console.error('getOrComputeLogoWidthRatio analysis:', e.message);
+    return { ratio: DEFAULT_RATIO, source: 'default-analysis-failed', reasoning: 'Analiza brandbooka nie powiodla sie: ' + e.message };
+  }
+}
+
 // Generyczny mechanizm (dziala dla kazdego projektu, nie tylko b2impact):
 // wykrywa w JAKIEJ SKALI projektant klienta faktycznie umieszczal logo na
 // jego wlasnych, wczesniej wgranych "przykladach kompozycji" (referenceImages
@@ -1465,12 +1552,29 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
           const logoMeta = await sharp(logoBuf).metadata();
           const naturalLogoW = logoMeta.width || 300;
           const naturalLogoH = logoMeta.height || 100;
-          // Generyczne wykrywanie realnej skali logo z wlasnych przykladow
-          // klienta (dziala dla kazdego projektu, nie tylko b2impact) -
-          // dopiero gdy dopasowanie niepewne, uzywamy bezpiecznego domyslnego
-          // procentu (17% szerokosci layoutu).
-          const detected = await detectLogoWidthRatioFromReferences(designAssets.logoDataUrl, designAssets.referenceImages);
-          const widthRatio = detected ? detected.ratio : 0.17;
+          // UWAGA: automatyczne dopasowanie pikselowe (detectLogoWidthRatioFromReferences)
+          // dalo w tescie na b2impact falszywie wysoka pewnosc (0.987) dla
+          // wyniku 5% - wizualna weryfikacja realnego przykladu klienta oraz
+          // brand booka (str. 21/48/51) pokazala, ze to bylo dopasowanie do
+          // plaskiego/jednolitego fragmentu tla, nie do prawdziwego logo.
+          // Prosty blad bezwzgledny (SAD) bez sprawdzenia struktury krawedzi
+          // w dopasowanym fragmencie referencji jest podatny na takie falszywe
+          // trafienia. Funkcja zostaje w kodzie (do dalszej poprawy/walidacji
+          // na realnych danych), ale NIE jest jeszcze zaufana jako zrodlo
+          // prawdy - do czasu naprawy uzywamy stalej wartosci opartej na
+          // faktycznych dowodach: wizualny pomiar realnej kompozycji klienta
+          // (~20-25% szerokosci) i brand book B2 Impact (str. 21: min. 35px/
+          // 10mm - prog czytelnosci; str. 48: logo = krotszy bok formatu / 2.5
+          // dla ukladow drukowanych, co potwierdza ze logo ma miec realna
+          // widoczna obecnosc, nie znikac w rogu).
+          // Generyczne zrodlo prawdy: jesli projekt ma wgrany brandbook (Baza
+          // Wiedzy Marki -> kategoria 'brandbook'), analizujemy JEGO tresc
+          // (LLM, cache'owane w DB, patrz getOrComputeLogoWidthRatio wyzej) i
+          // uzywamy realnej wytycznej klienta. Dziala identycznie dla kazdego
+          // projektu, nie tylko b2impact - jesli brandbooka nie ma, spada na
+          // bezpieczny domyslny procent (0.20).
+          const brandbookRule = await getOrComputeLogoWidthRatio(projectId, designAssets.brandbookText, OPENAI_KEY);
+          const widthRatio = brandbookRule.ratio;
           const targetLogoW = Math.round(outW * widthRatio);
           const targetLogoH = Math.round(targetLogoW * (naturalLogoH / naturalLogoW));
           const logoResized = await sharp(logoBuf).resize({ width: targetLogoW }).png().toBuffer();
@@ -1479,7 +1583,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
             .png()
             .toBuffer();
           b64 = composited.toString('base64');
-          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + (detected ? 'detected-from-references' : 'fallback-default') + (detected ? ' matchScore=' + detected.score.toFixed(3) : '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
+          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + brandbookRule.source + ' confidence=' + (brandbookRule.confidence || 'n/a') + ' reasoning=' + JSON.stringify(brandbookRule.reasoning || '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
         } else {
           _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
         }
@@ -2013,7 +2117,7 @@ async function getProjectDesignAssets(projectId) {
       return { base64: r.file_data.toString('base64'), mime: r.mime_type || 'image/png' };
     }));
 
-    return { brandName, logoDataUrl, referenceImages, learnedPatternImages, aiContextText, colorPairs };
+    return { brandName, logoDataUrl, referenceImages, learnedPatternImages, aiContextText, brandbookText, colorPairs };
   } catch (e) {
     console.error('getProjectDesignAssets:', e.message);
     return null;
