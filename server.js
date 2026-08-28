@@ -1167,6 +1167,98 @@ const PHOTO_ARCHETYPES = {
 };
 const ARCHETYPE_KEYS = Object.keys(PHOTO_ARCHETYPES);
 
+// Generyczny mechanizm (dziala dla kazdego projektu, nie tylko b2impact):
+// wykrywa w JAKIEJ SKALI projektant klienta faktycznie umieszczal logo na
+// jego wlasnych, wczesniej wgranych "przykladach kompozycji" (referenceImages
+// z Bazy Wiedzy Marki tego projektu) - zamiast zgadywanego procentu na sztywno.
+// Dopasowanie szablonowe (template matching) w skali szarosci: dla kilku
+// kandydujacych skal logo przeszukuje lewy-gorny obszar kazdego przykladu
+// (tam, gdzie logo jest umieszczane wg naszej konwencji) i liczy najlepsze
+// dopasowanie pikselowe (znormalizowany blad bezwzgledny). Jesli dopasowanie
+// jest wystarczajaco pewne, zwraca wykryta proporcje szerokosci logo do
+// szerokosci calego layoutu; w przeciwnym razie zwraca null (wywolujacy kod
+// ma wtedy uzyc bezpiecznego domyslnego procentu).
+async function detectLogoWidthRatioFromReferences(logoDataUrl, referenceImages) {
+  try {
+    if (!logoDataUrl || !referenceImages || !referenceImages.length) return null;
+    const logoMatch = logoDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!logoMatch) return null;
+    const logoBuf = Buffer.from(logoMatch[2], 'base64');
+    const logoMeta = await sharp(logoBuf).metadata();
+    if (!logoMeta.width || !logoMeta.height) return null;
+    const logoAspect = logoMeta.height / logoMeta.width;
+
+    const WORK_W = 480;
+    const SEARCH_FRACTION = 0.5; // logo wg naszej konwencji siedzi w lewym gornym rogu
+    const SCALE_CANDIDATES = [0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.17, 0.20, 0.23, 0.26, 0.30];
+    const CONFIDENCE_THRESHOLD = 0.80; // 0..1, im wyzej tym bardziej pewne dopasowanie
+
+    let best = null; // { score, ratio }
+
+    for (const ref of referenceImages.slice(0, 3)) {
+      try {
+        const refBuf = Buffer.from(ref.base64, 'base64');
+        const refMetaOrig = await sharp(refBuf).metadata();
+        if (!refMetaOrig.width || !refMetaOrig.height) continue;
+        const workH = Math.round(refMetaOrig.height * (WORK_W / refMetaOrig.width));
+        const { data: refData } = await sharp(refBuf)
+          .resize({ width: WORK_W, height: workH, fit: 'fill' })
+          .greyscale()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+
+        const searchW = Math.round(WORK_W * SEARCH_FRACTION);
+        const searchH = Math.round(workH * SEARCH_FRACTION);
+        if (searchW < 10 || searchH < 10) continue;
+
+        for (const ratio of SCALE_CANDIDATES) {
+          const logoW = Math.max(6, Math.round(WORK_W * ratio));
+          const logoH = Math.max(4, Math.round(logoW * logoAspect));
+          if (logoW >= searchW || logoH >= searchH) continue;
+
+          const { data: logoData } = await sharp(logoBuf)
+            .flatten({ background: '#ffffff' }) // logo ma zwykle przezroczyste tlo - bez tego porownanie pikseli byloby bez sensu
+            .resize({ width: logoW, height: logoH, fit: 'fill' })
+            .greyscale()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+          let logoMean = 0;
+          for (let i = 0; i < logoData.length; i++) logoMean += logoData[i];
+          logoMean /= logoData.length;
+          let logoVar = 0;
+          for (let i = 0; i < logoData.length; i++) { const d = logoData[i] - logoMean; logoVar += d * d; }
+          logoVar /= logoData.length;
+          if (logoVar < 30) continue; // logo w tej skali zbyt "plaskie", zeby wiarygodnie dopasowac
+
+          const stride = Math.max(2, Math.round(logoW / 10));
+          for (let y = 0; y <= searchH - logoH; y += stride) {
+            for (let x = 0; x <= searchW - logoW; x += stride) {
+              let sad = 0, samples = 0;
+              for (let ly = 0; ly < logoH; ly += 2) {
+                const refRowStart = (y + ly) * WORK_W + x;
+                const logoRowStart = ly * logoW;
+                for (let lx = 0; lx < logoW; lx += 2) {
+                  const diff = refData[refRowStart + lx] - logoData[logoRowStart + lx];
+                  sad += diff < 0 ? -diff : diff;
+                  samples++;
+                }
+              }
+              const score = 1 - (sad / (samples * 255));
+              if (!best || score > best.score) best = { score, ratio };
+            }
+          }
+        }
+      } catch (perRefErr) { /* pomijamy ten jeden przyklad, probujemy kolejnych */ }
+    }
+
+    if (best && best.score >= CONFIDENCE_THRESHOLD) return { ratio: best.ratio, score: best.score };
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 app.post('/api/design/generate-image', async (req, res) => {
   const _t0 = Date.now();
   const _reqId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
@@ -1373,7 +1465,13 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
           const logoMeta = await sharp(logoBuf).metadata();
           const naturalLogoW = logoMeta.width || 300;
           const naturalLogoH = logoMeta.height || 100;
-          const targetLogoW = Math.round(outW * 0.17);
+          // Generyczne wykrywanie realnej skali logo z wlasnych przykladow
+          // klienta (dziala dla kazdego projektu, nie tylko b2impact) -
+          // dopiero gdy dopasowanie niepewne, uzywamy bezpiecznego domyslnego
+          // procentu (17% szerokosci layoutu).
+          const detected = await detectLogoWidthRatioFromReferences(designAssets.logoDataUrl, designAssets.referenceImages);
+          const widthRatio = detected ? detected.ratio : 0.17;
+          const targetLogoW = Math.round(outW * widthRatio);
           const targetLogoH = Math.round(targetLogoW * (naturalLogoH / naturalLogoW));
           const logoResized = await sharp(logoBuf).resize({ width: targetLogoW }).png().toBuffer();
           const composited = await sharp(Buffer.from(b64, 'base64'))
@@ -1381,7 +1479,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
             .png()
             .toBuffer();
           b64 = composited.toString('base64');
-          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
+          _log('LOGO_COMPOSITE_DONE', _meta + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + (detected ? 'detected-from-references' : 'fallback-default') + (detected ? ' matchScore=' + detected.score.toFixed(3) : '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
         } else {
           _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
         }
