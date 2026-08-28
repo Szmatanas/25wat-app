@@ -1182,29 +1182,9 @@ function _simpleTextHash(str) {
   return h.toString(36) + '_' + str.length;
 }
 
-async function getOrComputeLogoWidthRatio(projectId, brandbookText, openaiKey) {
-  const DEFAULT_RATIO = 0.20; // uzywane gdy brak brandbooka albo LLM nie potrafil nic sensownego wyciagnac
-  if (!brandbookText || !brandbookText.trim() || !projectId) {
-    return { ratio: DEFAULT_RATIO, source: 'default-no-brandbook', reasoning: 'Brak wgranego brandbooka dla tego projektu.' };
-  }
-  const currentHash = _simpleTextHash(brandbookText);
-  try {
-    const cached = await pool.query(
-      "SELECT text_content, metadata FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' ORDER BY created_at DESC LIMIT 1",
-      [projectId]
-    );
-    if (cached.rows[0] && cached.rows[0].metadata && cached.rows[0].metadata.sourceHash === currentHash) {
-      const parsed = JSON.parse(cached.rows[0].text_content);
-      return { ratio: parsed.ratio, source: 'cached-from-brandbook', reasoning: parsed.reasoning, confidence: parsed.confidence };
-    }
-  } catch (readErr) {
-    console.error('getOrComputeLogoWidthRatio cache read:', readErr.message);
-  }
-
-  if (!openaiKey) return { ratio: DEFAULT_RATIO, source: 'default-no-openai-key', reasoning: 'Brak klucza OpenAI do analizy brandbooka.' };
-
-  try {
-    const analysisPrompt = `Ponizej jest tekst wyekstrahowany z brandbooka klienta (moze zawierac szum z uklada strony, to normalne). Szukam WYLACZNIE wytycznych dotyczacych ROZMIARU LOGO w kompozycji social media z pelnokadrowym zdjeciem w tle i logo umieszczonym w rogu (nie chodzi o formalne uklady drukowane typu A4/A3 z siatka, chyba ze to jedyna dostepna wskazowka).
+async function analyzeLogoRatioFromBrandbookText(brandbookText, openaiKey) {
+  if (!openaiKey) throw new Error('Brak klucza OpenAI do analizy brandbooka.');
+  const analysisPrompt = `Ponizej jest tekst wyekstrahowany z brandbooka klienta (moze zawierac szum z uklada strony, to normalne). Szukam WYLACZNIE wytycznych dotyczacych ROZMIARU LOGO w kompozycji social media z pelnokadrowym zdjeciem w tle i logo umieszczonym w rogu (nie chodzi o formalne uklady drukowane typu A4/A3 z siatka, chyba ze to jedyna dostepna wskazowka).
 
 Zwroc WYLACZNIE czysty JSON (bez markdown), w formacie:
 {"ratio": liczba_miedzy_0.05_a_0.40, "confidence": "high"|"medium"|"low", "reasoning": "krotkie uzasadnienie po polsku, max 2 zdania, z odniesieniem do konkretnego zapisu z brandbooka jesli istnieje"}
@@ -1214,44 +1194,148 @@ Zwroc WYLACZNIE czysty JSON (bez markdown), w formacie:
 TEKST BRANDBOOKA:
 ${brandbookText.slice(0, 12000)}`;
 
-    const llmRes = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
-      body: JSON.stringify({
-        model: 'gpt-5',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: analysisPrompt }] }]
-      })
-    });
-    const llmData = await llmRes.json();
-    if (llmData.error) throw new Error('OpenAI: ' + llmData.error.message);
-    const msg = (llmData.output || []).find(item => item.type === 'message');
-    const textPart = msg && (msg.content || []).find(c => c.type === 'output_text');
-    if (!textPart) throw new Error('LLM nie zwrocil odpowiedzi tekstowej');
-    let raw = textPart.text.trim();
-    if (raw.startsWith('```')) raw = raw.replace(/^```(json)?/, '').replace(/```$/, '').trim();
-    const parsed = JSON.parse(raw);
-    let ratio = Number(parsed.ratio);
-    if (!isFinite(ratio) || ratio < 0.05 || ratio > 0.40) ratio = DEFAULT_RATIO;
-    const result = { ratio, confidence: parsed.confidence || 'low', reasoning: parsed.reasoning || '' };
+  const llmRes = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
+    body: JSON.stringify({
+      model: 'gpt-5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: analysisPrompt }] }]
+    })
+  });
+  const llmData = await llmRes.json();
+  if (llmData.error) throw new Error('OpenAI: ' + llmData.error.message);
+  const msg = (llmData.output || []).find(item => item.type === 'message');
+  const textPart = msg && (msg.content || []).find(c => c.type === 'output_text');
+  if (!textPart) throw new Error('LLM nie zwrocil odpowiedzi tekstowej');
+  let raw = textPart.text.trim();
+  if (raw.startsWith('```')) raw = raw.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  const parsed = JSON.parse(raw);
+  let ratio = Number(parsed.ratio);
+  if (!isFinite(ratio) || ratio < 0.05 || ratio > 0.40) throw new Error('Nieprawidlowy ratio z LLM: ' + parsed.ratio);
+  return { ratio, confidence: parsed.confidence || 'low', reasoning: parsed.reasoning || '' };
+}
 
+// Warstwa 2 (gdy brandbook nie istnieje, nie ma wytycznych, albo analiza sie
+// nie udala): zamiast zawodnego dopasowania pikselowego (SAD - patrz
+// detectLogoWidthRatioFromReferences nizej, ktore dalo fasz.-pozytywny wynik
+// na b2impact), pytamy model wizyjny (Claude, ten sam wzorzec co czytanie
+// obrazow brand booka przy uploadzie) wprost: "jaki procent szerokosci
+// zajmuje logo na tym realnym przykladzie klienta". Multimodalne rozumowanie
+// wizualne jest odporne na false-positive z plaskiego tla w sposob, w jaki
+// surowa korelacja pikseli nie jest.
+async function estimateLogoRatioFromReferenceVision(logoDataUrl, referenceImages, anthropicKey) {
+  if (!anthropicKey) throw new Error('Brak klucza Anthropic do analizy wizyjnej przykladow.');
+  if (!referenceImages || !referenceImages.length) throw new Error('Brak przykladowych kompozycji do analizy.');
+  const logoMatch = (logoDataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
+  if (!logoMatch) throw new Error('Nieprawidlowy format logoDataUrl.');
+  const ref = referenceImages[0];
+
+  const visionSys = 'Jestes ekspertem od brandingu. Otrzymasz dwa obrazy: [1] samodzielny plik logo marki, [2] realny przyklad gotowej kompozycji social media tej samej marki (zdjecie + logo w rogu, stworzony przez czlowieka projektanta). Twoje zadanie: oszacuj, jaki procent SZEROKOSCI calej kompozycji [2] zajmuje logo widoczne na niej. Odpowiedz WYLACZNIE czystym JSON: {"ratio": liczba_miedzy_0.05_a_0.40, "confidence": "high"|"medium"|"low", "reasoning": "1 zdanie po polsku"}. Jesli logo nie jest widoczne na kompozycji [2], zwroc {"ratio": 0.18, "confidence": "low", "reasoning": "Logo nie jest wyraznie widoczne na przykladzie."}';
+  const visionRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 400,
+      system: visionSys,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Obraz [1] - samodzielne logo marki:' },
+        { type: 'image', source: { type: 'base64', media_type: logoMatch[1], data: logoMatch[2] } },
+        { type: 'text', text: 'Obraz [2] - realny przyklad gotowej kompozycji tej marki:' },
+        { type: 'image', source: { type: 'base64', media_type: ref.mime || 'image/png', data: ref.base64 } }
+      ] }]
+    })
+  });
+  const visionData = await visionRes.json();
+  if (visionData.error) throw new Error('Anthropic: ' + (visionData.error.message || JSON.stringify(visionData.error)));
+  const textBlock = (visionData.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw new Error('Model wizyjny nie zwrocil tekstu.');
+  let raw = textBlock.text.trim();
+  if (raw.startsWith('```')) raw = raw.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+  const parsed = JSON.parse(raw);
+  let ratio = Number(parsed.ratio);
+  if (!isFinite(ratio) || ratio < 0.05 || ratio > 0.40) throw new Error('Nieprawidlowy ratio z modelu wizyjnego: ' + parsed.ratio);
+  return { ratio, confidence: parsed.confidence || 'low', reasoning: parsed.reasoning || '' };
+}
+
+async function getOrComputeLogoWidthRatio(projectId, brandbookText, referenceImages, logoDataUrl, openaiKey, anthropicKey) {
+  const DEFAULT_RATIO = 0.20; // ostateczny fallback, gdy ani brandbook ani przyklady nic nie daja
+  if (!projectId) return { ratio: DEFAULT_RATIO, source: 'default-no-project', reasoning: '' };
+
+  // Cache key uwzglednia i tekst brandbooka, i "odcisk palca" dostepnych
+  // przykladow (liczba + przyblizony rozmiar pierwszego pliku) - zmiana
+  // ktoregokolwiek z tych zrodel przeliczy regule na nowo.
+  const refFingerprint = (referenceImages && referenceImages.length)
+    ? (referenceImages.length + ':' + (referenceImages[0].base64 ? referenceImages[0].base64.length : 0))
+    : 'no-refs';
+  const currentHash = _simpleTextHash((brandbookText || '') + '|' + refFingerprint);
+
+  try {
+    const cached = await pool.query(
+      "SELECT text_content, metadata FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' ORDER BY created_at DESC LIMIT 1",
+      [projectId]
+    );
+    if (cached.rows[0] && cached.rows[0].metadata && cached.rows[0].metadata.sourceHash === currentHash) {
+      const parsed = JSON.parse(cached.rows[0].text_content);
+      return { ratio: parsed.ratio, source: 'cached:' + parsed.source, reasoning: parsed.reasoning, confidence: parsed.confidence };
+    }
+  } catch (readErr) {
+    console.error('getOrComputeLogoWidthRatio cache read:', readErr.message);
+  }
+
+  let result = null;
+  let source = null;
+
+  // Warstwa 1: brandbook. Akceptujemy wynik jesli sie udal I confidence nie
+  // jest 'low' (low = brandbook w praktyce nic konkretnego nie mowil - wtedy
+  // wolimy sprawdzic realny przyklad zamiast trzymac sie sredniej zgadywanki).
+  if (brandbookText && brandbookText.trim()) {
+    try {
+      const r = await analyzeLogoRatioFromBrandbookText(brandbookText, openaiKey);
+      if (r.confidence !== 'low') { result = r; source = 'analyzed-from-brandbook'; }
+      else { result = r; source = 'analyzed-from-brandbook-low-confidence'; } // trzymamy jako plan B nizej
+    } catch (e) {
+      console.error('getOrComputeLogoWidthRatio brandbook tier:', e.message);
+    }
+  }
+
+  // Warstwa 2: wizyjna analiza realnego przykladu klienta - uzywana gdy
+  // warstwa 1 nic nie dala, albo dala tylko niepewny wynik.
+  if (!result || source === 'analyzed-from-brandbook-low-confidence') {
+    try {
+      const visionResult = await estimateLogoRatioFromReferenceVision(logoDataUrl, referenceImages, anthropicKey);
+      result = visionResult;
+      source = 'estimated-from-reference-vision';
+    } catch (e) {
+      console.error('getOrComputeLogoWidthRatio vision tier:', e.message);
+      // Nic nie robimy - jesli warstwa 1 dala chociaz niepewny wynik, `result`
+      // juz go trzyma (przypisanie wyzej nie wykonalo sie z powodu wyjatku) i
+      // zostanie uzyty ponizej. Jesli warstwa 1 nic nie dala, result zostaje
+      // null i leci do ostatecznego defaultu.
+    }
+  }
+
+  if (!result) {
+    return { ratio: DEFAULT_RATIO, source: 'default-all-tiers-failed', reasoning: 'Brak brandbooka/przykladow albo obie analizy zawiodly.' };
+  }
+
+  try {
     await pool.query(
       `INSERT INTO brand_assets (project_id, category, filename, mime_type, text_content, metadata)
-       VALUES ($1, 'logo_size_rule', 'auto-analiza-brandbooka.json', 'application/json', $2, $3)`,
-      [projectId, JSON.stringify(result), JSON.stringify({ sourceHash: currentHash })]
+       VALUES ($1, 'logo_size_rule', 'auto-analiza-loga.json', 'application/json', $2, $3)`,
+      [projectId, JSON.stringify({ ratio: result.ratio, confidence: result.confidence, reasoning: result.reasoning, source }), JSON.stringify({ sourceHash: currentHash })]
     );
-    // sprzatamy stare wpisy tej kategorii - trzymamy tylko najnowszy
     await pool.query(
       `DELETE FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' AND id NOT IN (
          SELECT id FROM brand_assets WHERE project_id = $1 AND category = 'logo_size_rule' ORDER BY created_at DESC LIMIT 1
        )`,
       [projectId]
     );
-
-    return { ratio: result.ratio, source: 'analyzed-from-brandbook', reasoning: result.reasoning, confidence: result.confidence };
-  } catch (e) {
-    console.error('getOrComputeLogoWidthRatio analysis:', e.message);
-    return { ratio: DEFAULT_RATIO, source: 'default-analysis-failed', reasoning: 'Analiza brandbooka nie powiodla sie: ' + e.message };
+  } catch (writeErr) {
+    console.error('getOrComputeLogoWidthRatio cache write:', writeErr.message);
   }
+
+  return { ratio: result.ratio, source, reasoning: result.reasoning, confidence: result.confidence };
 }
 
 // Generyczny mechanizm (dziala dla kazdego projektu, nie tylko b2impact):
@@ -1573,7 +1657,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
           // uzywamy realnej wytycznej klienta. Dziala identycznie dla kazdego
           // projektu, nie tylko b2impact - jesli brandbooka nie ma, spada na
           // bezpieczny domyslny procent (0.20).
-          const brandbookRule = await getOrComputeLogoWidthRatio(projectId, designAssets.brandbookText, OPENAI_KEY);
+          const brandbookRule = await getOrComputeLogoWidthRatio(projectId, designAssets.brandbookText, designAssets.referenceImages, designAssets.logoDataUrl, OPENAI_KEY, ANTHROPIC_KEY);
           const widthRatio = brandbookRule.ratio;
           const targetLogoW = Math.round(outW * widthRatio);
           const targetLogoH = Math.round(targetLogoW * (naturalLogoH / naturalLogoW));
