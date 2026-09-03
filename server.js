@@ -1558,14 +1558,19 @@ app.post('/api/design/generate-image', async (req, res) => {
       ? `Użyj DOKŁADNIE tego headline, nie zmieniaj treści: "${customHeadline}"`
       : `Wyciągnij z posta krótki, konkretny headline (max 3 linie) - dokładnie o tym, o czym jest ten post, nie ogólnik o firmie. Zachowaj poprawne polskie znaki diakrytyczne (ą, ę, ó, ś, ź, ż, ć, ń, ł).`;
 
-    // Skrocona wersja (byla): 6 zdan powtarzajacych "nie zmieniaj/nie
-    // przerysowuj/musi byc nieodrozniale" - hipoteza (Jan, 3.09): dlugie
-    // listy "nie rob X" rozpraszaja model kosztem spojnosci kompozycji.
-    // Zostawiamy JEDEN twardy wymog (tozsamosc osoby), reszta promptu
-    // jawnie zaprasza do swobodnej interpretacji stylu z referencji,
-    // zamiast checklisty element-po-elemencie. Testowe - jesli kompozycje
-    // beda gorsze, wrocic do pelnej wersji (git log przed tym commitem).
-    const photoInstruction = wantsPhoto ? `The LAST attached image is the real photo of the person featured in this post - keep their identity exactly as shown (face, hair, skin tone, clothing, pose): don't redraw, restyle or replace them.${(usingCustomRefs || usingLearnedPatterns) ? ` The OTHER attached images are real example compositions from this brand - use them as loose creative inspiration for layout, shapes, colors and typography. You don't need to match them element-by-element; interpret their overall feel and energy freely, the way a human designer would riff on a mood board rather than copy a template. Any people or faces visible in those other reference images are irrelevant to this task - ignore them completely, they exist only to show composition style, never borrow their identity.` : ''} Build the composition around the photo - everything else (background, shapes, typography, colors) is yours to design freely.` : 'Ten post nie ma zdjęcia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjęcia i bez osoby.';
+    const photoInstruction = wantsPhoto ? `The LAST attached image is the real photo of the person featured in this post. This photo has higher priority than every other reference image attached below.
+
+Treat this image as the primary visual anchor. Preserve the person's identity with the highest possible fidelity.
+
+Do not change: facial structure, eyes, nose, mouth, hairstyle, facial hair, skin tone, age, expression, clothing, body proportions, pose, camera angle.
+
+Do not reinterpret, beautify, stylize, redraw or replace the person. Do not generate a similar person. Use the supplied person exactly as the reference.
+
+The person must be indistinguishable from the supplied photograph.
+
+Build the entire composition around this photo. Modify only the surrounding graphic design: typography, colors, shapes, illustrations, background, layout.${(usingCustomRefs || usingLearnedPatterns) ? `
+
+IMPORTANT: any people, faces, or human figures visible in the OTHER reference images attached earlier (before this last photo) are completely irrelevant to this task - those images are used ONLY as style/layout/typography/color references. Ignore any face or identity shown in them entirely. Do not blend, merge, average, or borrow any facial feature, skin tone, hairstyle or expression from them. The ONLY identity that matters anywhere in this composition is the person in the LAST attached photo.` : ''}` : 'Ten post nie ma zdjęcia - czysta kompozycja typograficzna z doodle/flubber zgodnie ze schematem, bez zdjęcia i bez osoby.';
 
     const styleInstruction = styleNote ? `Uwaga stylistyczna od klienta, zastosuj ją: ${styleNote}` : '';
 
