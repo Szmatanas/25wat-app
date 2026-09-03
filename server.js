@@ -248,7 +248,12 @@ function signToken(user) {
 
 async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
+  // Fallback na ?token= w query string - potrzebne dla zwyklych <img>/<a href>
+  // (galeria podgladu plikow), ktore nie moga ustawic naglowka Authorization.
+  // Reszta endpointow dalej dziala normalnie przez header, to tylko dodatkowa
+  // opcja, nic nie wylacza.
+  const token = headerToken || req.query.token || null;
   if (!token) return res.status(401).json({ error: 'Brak tokenu' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
@@ -717,6 +722,59 @@ app.delete('/api/projects/:projectId/assets/:assetId', requireAuth, requireProje
     res.status(500).json({ error: e.message });
   }
 });
+// Prosta galeria podgladu/pobierania wszystkich wgranych plikow projektu -
+// w UI nie ma jeszcze takiego widoku, wiec to samodzielna strona HTML
+// serwowana wprost z backendu. Autoryzacja przez ?token=... w URL (patrz
+// requireAuth wyzej) - dlatego link trzeba budowac z wlasnym tokenem, ten
+// sam token ktorego uzywasz w naglowku Authorization do reszty API.
+app.get('/api/projects/:projectId/assets/gallery', requireAuth, requireProjectMember, async (req, res) => {
+  try {
+    const tokenParam = req.query.token ? '?token=' + encodeURIComponent(req.query.token) : '';
+    const result = await pool.query(
+      'SELECT id, category, filename, mime_type, text_content, created_at, (file_data IS NOT NULL) AS has_file FROM brand_assets WHERE project_id = $1 ORDER BY category, created_at DESC',
+      [req.projectId]
+    );
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const byCategory = {};
+    for (const row of result.rows) {
+      (byCategory[row.category] = byCategory[row.category] || []).push(row);
+    }
+    let body = '';
+    for (const category of Object.keys(byCategory).sort()) {
+      body += '<h2>' + esc(category) + '</h2><div class="grid">';
+      for (const a of byCategory[category]) {
+        const fileUrl = '/api/projects/' + req.projectId + '/assets/' + a.id + '/file' + tokenParam;
+        const isImage = a.mime_type && a.mime_type.startsWith('image/');
+        body += '<div class="card">';
+        body += '<div class="meta">' + esc(a.filename || '(bez nazwy)') + '<br><small>' + esc(a.mime_type || (a.text_content ? 'tekst' : '')) + ' &middot; ' + esc(new Date(a.created_at).toLocaleString('pl-PL')) + '</small></div>';
+        if (a.has_file && isImage) {
+          body += '<a href="' + fileUrl + '" target="_blank"><img src="' + fileUrl + '" loading="lazy"></a>';
+          body += '<div><a href="' + fileUrl + '" download="' + esc(a.filename || (a.id + '.png')) + '">Pobierz</a></div>';
+        } else if (a.has_file) {
+          body += '<div class="filebox">plik binarny</div>';
+          body += '<div><a href="' + fileUrl + '" download="' + esc(a.filename || a.id) + '">Pobierz</a></div>';
+        } else if (a.text_content) {
+          body += '<div class="textbox">' + esc(a.text_content.slice(0, 400)) + (a.text_content.length > 400 ? '&hellip;' : '') + '</div>';
+        } else {
+          body += '<div class="filebox">(brak zawartosci)</div>';
+        }
+        body += '</div>';
+      }
+      body += '</div>';
+    }
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(
+      '<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><title>Galeria plikow - projekt ' + req.projectId + '</title>' +
+      '<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;padding:24px}h2{margin-top:32px;text-transform:uppercase;font-size:14px;letter-spacing:.05em;color:#999}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.card{background:#1c1c1c;border-radius:8px;padding:12px}.card img{width:100%;height:auto;border-radius:4px;background:#fff}.meta{font-size:12px;color:#ccc;margin-bottom:8px;word-break:break-all}.textbox{font-size:12px;white-space:pre-wrap;max-height:200px;overflow:auto;background:#111;padding:8px;border-radius:4px}.filebox{font-size:12px;color:#888;padding:8px;background:#111;border-radius:4px;text-align:center}a{color:#7cb3ff}</style>' +
+      '</head><body><h1>Pliki projektu #' + req.projectId + '</h1>' + (body || '<p>Brak wgranych plikow.</p>') + '</body></html>'
+    );
+  } catch (e) {
+    console.error('assets gallery:', e.message);
+    res.status(500).send('Blad: ' + esc_(e.message));
+  }
+});
+function esc_(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
 const TAVILY_KEY = process.env.TAVILY_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || '';
 const REMOVE_BG_KEY = process.env.REMOVEBG_API_KEY || '';
