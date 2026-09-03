@@ -1644,7 +1644,14 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
           // "ikona + nazwa" jak b2impact - przy stalej wysokosci szeroki
           // wariant zawsze wyglada mniejszy). Konwencja z brandbookow: logo
           // w rogu kompozycji = ok. 16-18% szerokosci calego layoutu.
-          const logoMeta = await sharp(logoBuf).metadata();
+          let logoBufTrimmed;
+          try {
+            logoBufTrimmed = await sharp(logoBuf).trim().toBuffer();
+          } catch (trimErr) {
+            _log('LOGO_TRIM_SKIPPED', _meta + ' reason=' + trimErr.message);
+            logoBufTrimmed = logoBuf;
+          }
+          const logoMeta = await sharp(logoBufTrimmed).metadata();
           const naturalLogoW = logoMeta.width || 300;
           const naturalLogoH = logoMeta.height || 100;
           // UWAGA: automatyczne dopasowanie pikselowe (detectLogoWidthRatioFromReferences)
@@ -1672,13 +1679,13 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
           const widthRatio = brandbookRule.ratio;
           const targetLogoW = Math.round(outW * widthRatio);
           const targetLogoH = Math.round(targetLogoW * (naturalLogoH / naturalLogoW));
-          const logoResized = await sharp(logoBuf).resize({ width: targetLogoW }).png().toBuffer();
+          const logoResized = await sharp(logoBufTrimmed).resize({ width: targetLogoW }).png().toBuffer();
           const composited = await sharp(Buffer.from(b64, 'base64'))
             .composite([{ input: logoResized, left: margin, top: margin }])
             .png()
             .toBuffer();
           b64 = composited.toString('base64');
-          _log('LOGO_COMPOSITE_DONE', _meta + ' actualImageSize=' + outW + 'x' + outH + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + brandbookRule.source + ' confidence=' + (brandbookRule.confidence || 'n/a') + ' reasoning=' + JSON.stringify(brandbookRule.reasoning || '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' margin=' + margin);
+          _log('LOGO_COMPOSITE_DONE', _meta + ' actualImageSize=' + outW + 'x' + outH + ' logoW=' + targetLogoW + ' logoH=' + targetLogoH + ' widthRatio=' + widthRatio + ' ratioSource=' + brandbookRule.source + ' confidence=' + (brandbookRule.confidence || 'n/a') + ' reasoning=' + JSON.stringify(brandbookRule.reasoning || '') + ' naturalRatio=' + (naturalLogoW / naturalLogoH).toFixed(2) + ' trimmedLogoW=' + naturalLogoW + ' trimmedLogoH=' + naturalLogoH + ' margin=' + margin);
         } else {
           _log('LOGO_COMPOSITE_SKIPPED', _meta + ' reason=logoDataUrl-nie-pasuje-do-wzorca-data-url');
         }
