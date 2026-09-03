@@ -1537,9 +1537,18 @@ app.post('/api/design/generate-image', async (req, res) => {
   const isUploadedPhoto = wantsPhoto && photoSource === 'uploaded';
   const hasLearnedPatterns = !!(designAssets && designAssets.learnedPatternImages && designAssets.learnedPatternImages.length);
   const hasOwnRefs = !!(designAssets && designAssets.referenceImages && designAssets.referenceImages.length);
+  // Bylo: przy zdjeciu generowanym przez AI (nie wgranym) ta galaz w ogole nie
+  // sprawdzala learned_patterns - jesli klient nie wgral recznie osobnej,
+  // czesto pustej kategorii 'reference_designs', kod spadal prosto do
+  // twardych, genericznych przykladow 25wat (DARK_REFS/LIGHT_REFS ponizej),
+  // kompletnie niezwiazanych ze stylem marki klienta. Efekt zaobserwowany na
+  // b2impact: kompozycja "z generycznego szablonu", zla kolorystyka, zle
+  // dopasowanie do brandbooka. Teraz: reference_designs > learned_patterns >
+  // dopiero na koncu generyczny fallback - spojnie z galezia dla zdjec
+  // wgranych.
   const refMode = isUploadedPhoto
     ? (hasLearnedPatterns ? 'learned' : 'fixed')
-    : (hasOwnRefs ? 'custom' : 'fixed');
+    : (hasOwnRefs ? 'custom' : (hasLearnedPatterns ? 'learned' : 'fixed'));
   const usingCustomRefs = refMode === 'custom';
   const usingLearnedPatterns = refMode === 'learned';
 
