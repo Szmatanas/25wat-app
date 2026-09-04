@@ -1656,7 +1656,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
         body: JSON.stringify({
           model: 'gpt-5',
           input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
-          tools: [{ type: 'image_generation', size, input_fidelity: 'high' }],
+          tools: [{ type: 'image_generation', size, model: 'gpt-image-1', input_fidelity: 'high' }],
           tool_choice: { type: 'image_generation' }
         })
       });
@@ -1886,7 +1886,7 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
         body: JSON.stringify({
           model: 'gpt-5',
           input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
-          tools: [{ type: 'image_generation', size, input_fidelity: 'high' }],
+          tools: [{ type: 'image_generation', size, model: 'gpt-image-1', input_fidelity: 'high' }],
           tool_choice: { type: 'image_generation' }
         })
       });
