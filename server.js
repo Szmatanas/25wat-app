@@ -1037,7 +1037,7 @@ app.post('/api/design/generate-photo', async (req, res) => {
           'Authorization': 'Bearer ' + OPENAI_KEY
         },
         body: JSON.stringify({
-          model: 'gpt-image-1',
+          model: 'gpt-image-2',
           prompt,
           n: 1,
           size: '1024x1536',
@@ -1656,7 +1656,7 @@ IMPORTANT: any people, faces, or human figures visible in the OTHER reference im
         body: JSON.stringify({
           model: 'gpt-5',
           input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
-          tools: [{ type: 'image_generation', size, model: 'gpt-image-1', input_fidelity: 'high' }],
+          tools: [{ type: 'image_generation', size, model: 'gpt-image-2' }],
           tool_choice: { type: 'image_generation' }
         })
       });
@@ -1886,7 +1886,7 @@ Odpowiedz WYLACZNIE czystym JSON (bez markdown, bez wstepu) w formacie:
         body: JSON.stringify({
           model: 'gpt-5',
           input: [{ role: 'user', content: [{ type: 'input_text', text: promptForApi }, ...imageContentParts] }],
-          tools: [{ type: 'image_generation', size, model: 'gpt-image-1', input_fidelity: 'high' }],
+          tools: [{ type: 'image_generation', size, model: 'gpt-image-2' }],
           tool_choice: { type: 'image_generation' }
         })
       });
@@ -1988,7 +1988,7 @@ app.post('/api/design/generate-image-raw', async (req, res) => {
     const prompt = `${schemaText}\n\n---\n\nTo jest treosc posta:\n${postText}\n\nPrzygotuj grafike zgodnie ze schematem i referencjami. Zachowaj zdjecie.`;
 
     const form = new FormData();
-    form.append('model', 'gpt-image-1');
+    form.append('model', 'gpt-image-2');
     for (const f of FIXED_REFERENCES) {
       const buf = fs.readFileSync(path.join(EXAMPLES_DIR, f));
       form.append('image[]', new Blob([buf], { type: 'image/png' }), f);
